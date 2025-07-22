@@ -1,36 +1,36 @@
-import socket  # noqa: F401
-import threading
+import socket
+import asyncio
+from app.convert_commands import convert_resp
+from app.commands import redis_command
 
-def handle_ping(client_socket):
+async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     try:
         while True:
-            request: bytes = client_socket.recv(512)
-            data: str = request.decode()
-
-            # print(data)
-            if "ping" in data.lower():
-                client_socket.send("+PONG\r\n".encode())
+            request: bytes = await reader.read(1024) #read up to 1024
+            if not request:
+                break
+            data: str = request.decode('utf-8')
+            commands, args = convert_resp(request)
+            if not commands:
+                writer.write("-ERR invalid RESP format\r\n".encode())
+                continue
+            if isinstance(commands,str):
+                writer.write(redis_command(commands,args))
+            else:
+                for command,arg in zip(commands,args):
+                    writer.write(redis_command(command,arg))
+            await writer.drain()
+    except Exception as e:
+        print(f"Error handling client: {e}")
     finally:
-        client_socket.close()
+        writer.close()
+        await writer.wait_closed()
 
-
-def main():
-    # You can use print statements as follows for debugging, they'll be visible when running tests.
+async def main():
     print("Logs from your program will appear here!")
+    server = await asyncio.start_server(handle_client, "localhost", 6379)
+    async with server:
+        await server.serve_forever()
 
-    # Uncomment this to pass the first stage
-    server_socket = socket.create_server(("localhost", 6379), reuse_port=True)
-    try:
-        while True:
-            client_socket, addr = server_socket.accept()  # Wait for a client
-            print(f"New connection from {addr}")
-            # Start a new thread for each client
-            client_thread = threading.Thread(target=handle_ping, args=(client_socket,))
-            client_thread.start()
-    finally:
-        server_socket.close()
-
-
-    
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
