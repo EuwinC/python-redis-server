@@ -9,8 +9,8 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             request: bytes = await reader.read(1024) #read up to 1024
             if not request:
                 break
-            data: str = request.decode('utf-8')
-            commands, args = convert_resp(request)
+            commands,args = convert_resp(request)
+            print(commands,args)
             if not commands:
                 writer.write("-ERR invalid RESP format\r\n".encode())
                 continue

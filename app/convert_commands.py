@@ -1,25 +1,29 @@
 def parse_text_command(data):
     """Parse plain text commands separated by \n or \r\n, returning a list of (command, args)."""
-    lines = [line for line in data.replace("\r\n", "\n").split("\n") if line.strip()]
+    data = data.replace("\r\n", "\n")
+    
+    # Check if data contains newlines (excluding a trailing newline)
+    if '\n' in data.strip():
+        # Split by newlines and filter out empty or whitespace-only lines
+        lines = [line for line in data.split("\n") if line.strip()]
+    else:
+        # Split by spaces for a single line
+        lines = data.strip().split()
     results = []
-    ping_count = 0  # Track number of PING commands
+    condition,args = "",[]
+    functions = {'ping','echo','set','get'}
     for line in lines:
-        parts = line.split()
-        if line.lower() == "ping":
-            ping_count += 1
-            if ping_count == 1:
-                # First PING: return ('ping', 'ping')
-                command = "ping"
-                args = "ping"
+        if line.lower() in functions:
+            if condition == "":
+                condition = line.lower()
             else:
-                # Subsequent PING: return ([], [])
-                command = []
-                args = []
+                results.append((condition,args))
+                condition,args = line.lower(),[]
         else:
-            command = parts[0].lower() if parts else ""
-            args = parts[1:] if len(parts) > 1 else []
-        results.append((command, args))
+            args.append(line)
+    results.append((condition,args))
     return results
+        
 
 def convert_resp(data):
     """Parse a RESP array and return the command (first element) and arguments."""
@@ -58,9 +62,15 @@ def convert_resp(data):
         return None, []
 
 def main():
-    data1 = "*2\r\n$4\r\nECHO\r\n$9\r\nblueberry\r\n"
-    data2 = "PING\nPING"
-    print(convert_resp(data1))
+    data1 = "SeT\nfoo\nbar"
+    data2 = "SET pineapple raspberry"
+    data3= "SET mango strawberry"
+    
+    convert = convert_resp(data1)
+    convert = convert_resp(data3)
+    commands = [item[0] for item in convert]
+    args = [item[1] for item in convert] 
+    print(commands,args)
     print(convert_resp(data2))
 
 if __name__ == "__main__":
