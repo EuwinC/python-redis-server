@@ -1,7 +1,7 @@
 from datetime import datetime
-from app.database import RPUSH
+from app.database import PUSH
 store = dict() #[[key,value,time_delete]]
-rpush = dict() #[list_name:RPUSH]
+push = dict() #[list_name:PUSH]
 
 def ping_func():
     return "+PONG\r\n"
@@ -26,19 +26,27 @@ def get_func(key):
     return f"${len(value)}\r\n{value}\r\n" if value != "" else "$-1\r\n"
 
 def rpush_func(args):
-    if args[0] not in rpush:
-        rpush[args[0]] = RPUSH(args[0])
+    if args[0] not in push:
+        push[args[0]] = PUSH(args[0])
     for i in range(1,len(args)):
-        rpush[args[0]].append_list(args[i])
-    length = rpush[args[0]].get_element_length()
+        push[args[0]].append_list(args[i])
+    length = push[args[0]].get_element_length()
+    return f":{length}\r\n" 
+
+def lpush_func(args):
+    if args[0] not in push:
+        push[args[0]] = PUSH(args[0])
+    for i in range(1,len(args)):
+        push[args[0]].append_left(args[i])
+    length = push[args[0]].get_element_length()
     return f":{length}\r\n" 
 
 def lrange_func(args): #array_name, left index, right index
     key = args[0]
     start, stop = int(args[1]), int(args[2])
-    if key not in rpush:
+    if key not in push:
         return "*0\r\n"
-    length = rpush[key].get_element_length()
+    length = push[key].get_element_length()
     if start < 0:
         start = length + start
     if stop < 0:
@@ -52,7 +60,7 @@ def lrange_func(args): #array_name, left index, right index
     count = stop - start + 1
     res = f"*{count}\r\n"
     for idx in range(start, stop + 1):
-        item = rpush[key].get_elements(idx)
+        item = push[key].get_elements(idx)
         res += f"${len(item)}\r\n{item}\r\n"
     return res
 
@@ -68,6 +76,8 @@ def redis_command(command,args):
         return(get_func(args[0]).encode())
     elif str(command) == "rpush":
         return(rpush_func(args).encode())
+    elif str(command) == "lpush":
+        return(lpush_func(args).encode())
     elif str(command) == "lrange":
         return(lrange_func(args).encode())
     else:

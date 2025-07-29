@@ -1,3 +1,4 @@
+from collections import deque
 class list_data:
     def __init__(self,key,value,exp_time = 0):
         self.key = key
@@ -7,15 +8,19 @@ class list_data:
     def get_value(self):
         return self.value
 
-class RPUSH:
+class PUSH:
     
     def __init__(self,name):
         self.name = name
-        self.elements = []
+        self.elements = deque()
 
     
     def append_list(self,elements):
         self.elements.append(elements)
+        return None
+    
+    def append_left(self,elements):
+        self.elements.appendleft(elements)
         return None
         
     

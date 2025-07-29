@@ -10,7 +10,6 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
             if not request:
                 break
             commands,args = convert_resp(request)
-            print(commands,args)
             if not commands:
                 writer.write("-ERR invalid RESP format\r\n".encode())
                 continue
