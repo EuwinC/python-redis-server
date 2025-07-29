@@ -2,8 +2,7 @@ from datetime import datetime
 from app.database import PUSH
 store = dict() #[[key,value,time_delete]]
 push = dict() #[list_name:PUSH]
-
-def ping_func():
+def ping_func(args):
     return "+PONG\r\n"
 
 def echo_func(args):
@@ -18,7 +17,8 @@ def set_func(args):
     store[key] = (value,datetime.now().timestamp()+float(exp_time)/1000)
     return f"+OK\r\n"
 
-def get_func(key):
+def get_func(args):
+    key = args[0]
     value,exp_time = store.get(key,"")
     if exp_time <= datetime.now().timestamp():
         del store[key]
@@ -26,35 +26,44 @@ def get_func(key):
     return f"${len(value)}\r\n{value}\r\n" if value != "" else "$-1\r\n"
 
 def rpush_func(args):
-    if args[0] not in push:
-        push[args[0]] = PUSH(args[0])
+    key = args[0]
+    if key not in push:
+        push[key] = PUSH(key)
     for i in range(1,len(args)):
-        push[args[0]].append_list(args[i])
-    length = push[args[0]].get_element_length()
+        push[key].append_right(args[i])
+    length = push[key].get_element_length()
     return f":{length}\r\n" 
 
 def lpush_func(args):
-    if args[0] not in push:
-        push[args[0]] = PUSH(args[0])
+    key = args[0]
+    if key not in push:
+        push[key] = PUSH(key)
     for i in range(1,len(args)):
-        push[args[0]].append_left(args[i])
-    length = push[args[0]].get_element_length()
+        push[key].append_left(args[i])
+    length = push[key].get_element_length()
+    return f":{length}\r\n" 
+
+def llen_func(args):
+    key = args[0]
+    if key not in push:
+        return f":0\r\n"
+    length = push[key].get_element_length()
     return f":{length}\r\n" 
 
 def lrange_func(args): #array_name, left index, right index
     key = args[0]
     start, stop = int(args[1]), int(args[2])
     if key not in push:
-        return "*0\r\n"
+        return f"*0\r\n"
     length = push[key].get_element_length()
     if start < 0:
         start = length + start
     if stop < 0:
         stop = length + stop    
-    if start < 0 :
+    if start < 0:
         start = 0
     if start >= length or start > stop:
-        return "*0\r\n"    
+        return f"*0\r\n"    
     if stop >= length:
         stop  = length - 1
     count = stop - start + 1
@@ -64,24 +73,23 @@ def lrange_func(args): #array_name, left index, right index
         res += f"${len(item)}\r\n{item}\r\n"
     return res
 
-def redis_command(command,args):
-    print(command,args)
-    if str(command) == "ping":
-        return(ping_func().encode())
-    elif str(command) == "echo":
-        return(echo_func(args).encode())
-    elif str(command) == "set":
-        return(set_func(args).encode())
-    elif str(command) == "get":
-        return(get_func(args[0]).encode())
-    elif str(command) == "rpush":
-        return(rpush_func(args).encode())
-    elif str(command) == "lpush":
-        return(lpush_func(args).encode())
-    elif str(command) == "lrange":
-        return(lrange_func(args).encode())
-    else:
-        return("-ERR unknown command or invalid arguments\r\n".encode())  
+COMMANDS = {
+    "ping":   ping_func,
+    "echo":   echo_func,
+    "set":    set_func,
+    "get":    get_func,
+    "rpush":  rpush_func,
+    "lpush":  lpush_func,
+    "lrange": lrange_func,
+    "llen": llen_func,
+}
+
+def redis_command(cmd, args):
+    print(cmd,args)
+    fn = COMMANDS.get(cmd.lower())
+    if not fn:
+        return b"-ERR unknown command or invalid arguments\r\n"
+    return fn(args).encode()
 
 
 if __name__ == "__main__":

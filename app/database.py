@@ -15,7 +15,7 @@ class PUSH:
         self.elements = deque()
 
     
-    def append_list(self,elements):
+    def append_right(self,elements):
         self.elements.append(elements)
         return None
     
