@@ -1,7 +1,7 @@
 from datetime import datetime
 from app.database import Redis_List
 import asyncio
-store = dict() #[[key,value,time_delete]]
+from app.kvstore import store
 
 def ping_func(args):
     return "+PONG\r\n"
@@ -10,21 +10,16 @@ def echo_func(args):
     return  f"${len(args[0])}\r\n{args[0]}\r\n"
 
 def set_func(args):
-    if len(args) == 4:
-        key,value,px,exp_time = args
-    else:
-        key,value = args
-        exp_time = 1000000
-    store[key] = (value,datetime.now().timestamp()+float(exp_time)/1000)
-    return f"+OK\r\n"
+    key, val = args[0], args[1]
+    ttl = float(args[3]) / 1000 if len(args) == 4 else None
+    store.set_string(key, val, ttl)
+    return "+OK\r\n"
+
 
 def get_func(args):
-    key = args[0]
-    value,exp_time = store.get(key,"")
-    if exp_time <= datetime.now().timestamp():
-        del store[key]
-        value = ""
-    return f"${len(value)}\r\n{value}\r\n" if value != "" else "$-1\r\n"
+    val = store.get_string(args[0])
+    return f"${len(val)}\r\n{val}\r\n" if val is not None else "$-1\r\n"
+
 
 def type_func(args):
     key = args[0]
