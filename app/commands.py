@@ -75,19 +75,25 @@ def lrange_func(args): #array_name, left index, right index
 
 def lpop_func(args):
     key = args[0]
+    # single‐element form: LPOP key
     if len(args) == 1:
-        remove = 1
-    else:
-        remove = args[1]
-    if key not in push:
-        return "$-1\r\n"
-    length = push[key].get_element_length()
-    if length == 0:
-        return "$-1\r\n"
-    res = f""
-    for i in range(remove):
-        removed_ele = push[key].pop_left()
-        res += f"${len(removed_ele)}\r\n{removed_ele}\r\n"
+        lst = push.get(key)
+        if not lst or lst.get_element_length() == 0:
+            return "$-1\r\n"
+        val = lst.pop_left()
+        return f"${len(val)}\r\n{val}\r\n"
+        remove = len(args[1])
+    # multi‐element form: LPOP key count
+    count = int(args[1])
+    lst = push.get(key)
+    if not lst or lst.get_element_length() == 0:
+        return "*0\r\n"
+    # pop up to `count` items
+    actual = min(count, lst.get_element_length())
+    res = f"*{actual}\r\n"
+    for _ in range(actual):
+        val = lst.pop_left()
+        res += f"${len(val)}\r\n{val}\r\n"
     return res
 
 COMMANDS = {
