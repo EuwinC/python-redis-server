@@ -1,9 +1,12 @@
 from datetime import datetime
+from app.database import RPUSH
 store = dict() #[[key,value,time_delete]]
-def ping():
+rpush = dict() #[list_name:RPUSH]
+
+def ping_func():
     return "+PONG\r\n"
 
-def echo(args):
+def echo_func(args):
     return  f"${len(args[0])}\r\n{args[0]}\r\n"
 
 def set_func(args):
@@ -22,17 +25,24 @@ def get_func(key):
         value = ""
     return f"${len(value)}\r\n{value}\r\n" if value != "" else "$-1\r\n"
 
+def rpush_func(args):
+    if args[0] not in rpush:
+        rpush[args[0]] = RPUSH(args[0])
+    length = rpush[args[0]].append_list(args[1])
+    return f":{length}\r\n" 
 
 def redis_command(command,args):
     print(command,args)
     if str(command) == "ping":
-        return(ping().encode())
-    elif str(command) == "echo" and args:
-        return(echo(args).encode())
+        return(ping_func().encode())
+    elif str(command) == "echo":
+        return(echo_func(args).encode())
     elif str(command) == "set":
         return(set_func(args).encode())
     elif str(command) == "get":
         return(get_func(args[0]).encode())
+    elif str(command) == "rpush":
+        return(rpush_func(args).encode())
     else:
         return("-ERR unknown command or invalid arguments\r\n".encode())  
 

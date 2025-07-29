@@ -11,7 +11,7 @@ def parse_text_command(data):
         lines = data.strip().split()
     results = []
     condition,args = "",[]
-    functions = {'ping','echo','set','get'}
+    functions = {'ping','echo','set','get','rpush'}
     for line in lines:
         if line.lower() in functions:
             if condition == "":
@@ -63,7 +63,7 @@ def convert_resp(data):
 
 def main():
     data1 = "SeT\nfoo\nbar"
-    data2 = "SET pineapple raspberry"
+    data2 = "redis-cli RPUSH list_key element"
     data3= "SET mango strawberry"
     
     convert = convert_resp(data1)
