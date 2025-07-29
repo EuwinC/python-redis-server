@@ -1,7 +1,8 @@
 from datetime import datetime
-from app.database import PUSH
+from app.database import Redis_List
+import asyncio
 store = dict() #[[key,value,time_delete]]
-push = dict() #[list_name:PUSH]
+redis_list = dict() #[list_name:redis_list]
 def ping_func(args):
     return "+PONG\r\n"
 
@@ -27,35 +28,35 @@ def get_func(args):
 
 def rpush_func(args):
     key = args[0]
-    if key not in push:
-        push[key] = PUSH(key)
+    if key not in redis_list:
+        redis_list[key] = Redis_List(key)
     for i in range(1,len(args)):
-        push[key].append_right(args[i])
-    length = push[key].get_element_length()
+        redis_list[key].append_right(args[i])
+    length = redis_list[key].get_element_length()
     return f":{length}\r\n" 
 
 def lpush_func(args):
     key = args[0]
-    if key not in push:
-        push[key] = PUSH(key)
+    if key not in redis_list:
+        redis_list[key] = Redis_List(key)
     for i in range(1,len(args)):
-        push[key].append_left(args[i])
-    length = push[key].get_element_length()
+        redis_list[key].append_left(args[i])
+    length = redis_list[key].get_element_length()
     return f":{length}\r\n" 
 
 def llen_func(args):
     key = args[0]
-    if key not in push:
+    if key not in redis_list:
         return f":0\r\n"
-    length = push[key].get_element_length()
+    length = redis_list[key].get_element_length()
     return f":{length}\r\n" 
 
 def lrange_func(args): #array_name, left index, right index
     key = args[0]
     start, stop = int(args[1]), int(args[2])
-    if key not in push:
+    if key not in redis_list:
         return f"*0\r\n"
-    length = push[key].get_element_length()
+    length = redis_list[key].get_element_length()
     if start < 0:
         start = length + start
     if stop < 0:
@@ -69,7 +70,7 @@ def lrange_func(args): #array_name, left index, right index
     count = stop - start + 1
     res = f"*{count}\r\n"
     for idx in range(start, stop + 1):
-        item = push[key].get_elements(idx)
+        item = redis_list[key].get_elements(idx)
         res += f"${len(item)}\r\n{item}\r\n"
     return res
 
@@ -77,7 +78,7 @@ def lpop_func(args):
     key = args[0]
     # single‐element form: LPOP key
     if len(args) == 1:
-        lst = push.get(key)
+        lst = redis_list.get(key)
         if not lst or lst.get_element_length() == 0:
             return "$-1\r\n"
         val = lst.pop_left()
@@ -85,7 +86,7 @@ def lpop_func(args):
         remove = len(args[1])
     # multi‐element form: LPOP key count
     count = int(args[1])
-    lst = push.get(key)
+    lst = redis_list.get(key)
     if not lst or lst.get_element_length() == 0:
         return "*0\r\n"
     # pop up to `count` items
@@ -95,6 +96,22 @@ def lpop_func(args):
         val = lst.pop_left()
         res += f"${len(val)}\r\n{val}\r\n"
     return res
+
+async def blpop_func(args):
+    key = args[0]
+    timeout = datetime.now().timestamp()+float(int(args[1]))/1000 if args[1] != 0 else 0
+    lst = redis_list.setdefault(key, Redis_List(key))
+    value = await lst.blpop(timeout)
+    if value is None:
+        # RESP nil array
+        return "$-1\r\n"
+    # return [ key, value ]
+    return (
+        f"*2\r\n"
+        f"${len(key)}\r\n{key}\r\n"
+        f"${len(value)}\r\n{value}\r\n"
+    )
+
 
 COMMANDS = {
     "ping":   ping_func,
@@ -106,6 +123,7 @@ COMMANDS = {
     "lrange": lrange_func,
     "llen": llen_func,
     "lpop": lpop_func,
+    "blpop": blpop_func,
 }
 
 def redis_command(cmd, args):
@@ -113,7 +131,7 @@ def redis_command(cmd, args):
     fn = COMMANDS.get(cmd.lower())
     if not fn:
         return b"-ERR unknown command or invalid arguments\r\n"
-    return fn(args).encode()
+    return fn(args)
 
 
 if __name__ == "__main__":

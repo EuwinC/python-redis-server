@@ -1,26 +1,25 @@
 import socket
-import asyncio
+import asyncio, inspect
 from app.convert_commands import convert_resp
 from app.commands import redis_command
 
-async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+async def handle_client(reader, writer):
     try:
         while True:
-            request: bytes = await reader.read(1024) #read up to 1024
-            if not request:
+            data = await reader.read(1024)
+            if not data:
                 break
-            commands,args = convert_resp(request)
-            if not commands:
-                writer.write("-ERR invalid RESP format\r\n".encode())
-                continue
-            if isinstance(commands,str):
-                writer.write(redis_command(commands,args))
+            cmd, args = convert_resp(data)
+            if not cmd:
+                resp = "-ERR invalid RESP format\r\n"
             else:
-                for command,arg in zip(commands,args):
-                    writer.write(redis_command(command,arg))
+                result = redis_command(cmd, args)
+                # if the command func was async we get a coroutine back:
+                if inspect.iscoroutine(result):
+                    result = await result
+                resp = result
+            writer.write(resp.encode() if isinstance(resp, str) else resp)
             await writer.drain()
-    except Exception as e:
-        print(f"Error handling client: {e}")
     finally:
         writer.close()
         await writer.wait_closed()
