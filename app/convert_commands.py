@@ -11,7 +11,7 @@ def parse_text_command(data):
         lines = data.strip().split()
     results = []
     condition,args = "",[]
-    functions = {'ping','echo','set','get','rpush'}
+    functions = {'ping','echo','set','get','rpush','lrange'}
     for line in lines:
         if line.lower() in functions:
             if condition == "":

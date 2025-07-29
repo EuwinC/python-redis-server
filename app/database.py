@@ -22,8 +22,10 @@ class RPUSH:
     def get_name(self):
         return self.name
 
-    def get_elements(self):
-        return self.elements
+    def get_elements(self,i =  None):
+        if i is None:
+            return self.elements
+        return self.elements[i]
     
     def get_element_length(self):
         return len(self.elements)

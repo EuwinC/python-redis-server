@@ -33,6 +33,23 @@ def rpush_func(args):
     length = rpush[args[0]].get_element_length()
     return f":{length}\r\n" 
 
+def lrange_func(args): #array_name, left index, right index
+    key = args[0]
+    if key not in rpush:
+        return "*0\r\n"
+    start, stop = int(args[1]), int(args[2])
+    length = rpush[args[0]].get_element_length()
+    if start >= length or start > stop:
+        return "*0\r\n"
+    if stop >= length:
+        stop  = length -1
+    count = stop - start + 1
+    res = f"*{count}\r\n"
+    for idx in range(start, stop + 1):
+        item = rpush[key].get_elements(idx)
+        res += f"${len(item)}\r\n{item}\r\n"
+    return res
+
 def redis_command(command,args):
     print(command,args)
     if str(command) == "ping":
@@ -45,6 +62,8 @@ def redis_command(command,args):
         return(get_func(args[0]).encode())
     elif str(command) == "rpush":
         return(rpush_func(args).encode())
+    elif str(command) == "lrange":
+        return(lrange_func(args).encode())
     else:
         return("-ERR unknown command or invalid arguments\r\n".encode())  
 
