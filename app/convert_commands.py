@@ -1,3 +1,5 @@
+from app.commands import COMMANDS
+
 def parse_text_command(data):
     """Parse plain text commands separated by \n or \r\n, returning a list of (command, args)."""
     data = data.replace("\r\n", "\n")
@@ -11,7 +13,7 @@ def parse_text_command(data):
         lines = data.strip().split()
     results = []
     condition,args = "",[]
-    functions = {'ping','echo','set','get','rpush','lrange'}
+    functions = set(COMMANDS.keys())
     for line in lines:
         if line.lower() in functions:
             if condition == "":

@@ -2,7 +2,7 @@ from datetime import datetime
 from app.database import Redis_List
 import asyncio
 store = dict() #[[key,value,time_delete]]
-redis_list = dict() #[list_name:redis_list]
+
 def ping_func(args):
     return "+PONG\r\n"
 
@@ -26,6 +26,15 @@ def get_func(args):
         value = ""
     return f"${len(value)}\r\n{value}\r\n" if value != "" else "$-1\r\n"
 
+def type_func(args):
+    key = args[0]
+    if key in store:
+        if isinstance(store[key][0],str):
+            return "+string\r\n"
+    return "+none\r\n"
+
+#List functions
+redis_list = dict() #[list_name:redis_list]
 def rpush_func(args):
     key = args[0]
     if key not in redis_list:
@@ -124,6 +133,7 @@ COMMANDS = {
     "llen": llen_func,
     "lpop": lpop_func,
     "blpop": blpop_func,
+    "type": type_func,
 }
 
 def redis_command(cmd, args):
