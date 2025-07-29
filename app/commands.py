@@ -35,14 +35,20 @@ def rpush_func(args):
 
 def lrange_func(args): #array_name, left index, right index
     key = args[0]
+    start, stop = int(args[1]), int(args[2])
     if key not in rpush:
         return "*0\r\n"
-    start, stop = int(args[1]), int(args[2])
-    length = rpush[args[0]].get_element_length()
+    length = rpush[key].get_element_length()
+    if start < 0:
+        start = length + start
+    if stop < 0:
+        stop = length + stop    
+    if start < 0 :
+        start = 0
     if start >= length or start > stop:
-        return "*0\r\n"
+        return "*0\r\n"    
     if stop >= length:
-        stop  = length -1
+        stop  = length - 1
     count = stop - start + 1
     res = f"*{count}\r\n"
     for idx in range(start, stop + 1):
