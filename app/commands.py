@@ -99,7 +99,7 @@ def lpop_func(args):
 
 async def blpop_func(args):
     key = args[0]
-    timeout = datetime.now().timestamp()+float(int(args[1]))/1000 if args[1] != 0 else 0
+    timeout =  float(args[1]) if len(args) > 1 else 0.0
     lst = redis_list.setdefault(key, Redis_List(key))
     value = await lst.blpop(timeout)
     if value is None:
