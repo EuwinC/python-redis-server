@@ -28,7 +28,9 @@ def get_func(key):
 def rpush_func(args):
     if args[0] not in rpush:
         rpush[args[0]] = RPUSH(args[0])
-    length = rpush[args[0]].append_list(args[1])
+    for i in range(1,len(args)):
+        rpush[args[0]].append_list(args[i])
+    length = rpush[args[0]].get_element_length()
     return f":{length}\r\n" 
 
 def redis_command(command,args):

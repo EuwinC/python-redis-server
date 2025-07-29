@@ -16,7 +16,7 @@ class RPUSH:
     
     def append_list(self,elements):
         self.elements.append(elements)
-        return self.get_element_length()
+        return None
         
     
     def get_name(self):
