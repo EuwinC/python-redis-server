@@ -14,16 +14,6 @@ class PUSH:
         self.name = name
         self.elements = deque()
 
-    
-    def append_right(self,elements):
-        self.elements.append(elements)
-        return None
-    
-    def append_left(self,elements):
-        self.elements.appendleft(elements)
-        return None
-        
-    
     def get_name(self):
         return self.name
 
@@ -34,6 +24,21 @@ class PUSH:
     
     def get_element_length(self):
         return len(self.elements)
+        
+    def append_right(self,elements):
+        self.elements.append(elements)
+        return None
+    
+    def append_left(self,elements):
+        self.elements.appendleft(elements)
+        return None
+    
+    def pop_left(self):
+        remove = self.elements.popleft()
+        return remove
+    
+
+    
 
 
     

@@ -73,6 +73,23 @@ def lrange_func(args): #array_name, left index, right index
         res += f"${len(item)}\r\n{item}\r\n"
     return res
 
+def lpop_func(args):
+    key = args[0]
+    if len(args) == 1:
+        remove = 1
+    else:
+        remove = args[1]
+    if key not in push:
+        return "$-1\r\n"
+    length = push[key].get_element_length()
+    if length == 0:
+        return "$-1\r\n"
+    res = f""
+    for i in range(remove):
+        removed_ele = push[key].pop_left()
+        res += f"${len(removed_ele)}\r\n{removed_ele}\r\n"
+    return res
+
 COMMANDS = {
     "ping":   ping_func,
     "echo":   echo_func,
@@ -82,6 +99,7 @@ COMMANDS = {
     "lpush":  lpush_func,
     "lrange": lrange_func,
     "llen": llen_func,
+    "lpop": lpop_func,
 }
 
 def redis_command(cmd, args):
