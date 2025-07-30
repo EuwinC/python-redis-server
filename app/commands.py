@@ -76,6 +76,7 @@ def xadd_func(args):
     field = dict() #field_name:field_val
     pairs = args[2:]
     field = {pairs[i]: pairs[i+1] for i in range(0, len(pairs), 2)}
+        
     new_id = xadd(key,new_id,field) 
     print(new_id)
     if new_id == "Error code 01":

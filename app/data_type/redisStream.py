@@ -1,3 +1,5 @@
+from datetime import datetime
+
 class Redis_Stream:
     def __init__(self,key:str):
         self.consumer_Group: dict[str, dict[str,dict[str, any]]] = {}  
@@ -30,7 +32,10 @@ def last_sequence_Number(stream):
 
 def xadd(key:str,new_id:str,fields: dict[str,str]):
     stream = get_stream(key)
-    msTime,seq_no = new_id.split("-")
+    if new_id == "*":
+        msTime,seq_no = datetime.now().timestamp(),"*"
+    else:
+        msTime,seq_no = new_id.split("-")
     lmsTime,lseq_no = last_sequence_Number(stream).split("-")
     if seq_no == "*":
         if msTime == lmsTime:
