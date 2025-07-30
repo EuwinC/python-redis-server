@@ -77,6 +77,11 @@ def xadd_func(args):
     pairs = args[2:]
     field = {pairs[i]: pairs[i+1] for i in range(0, len(pairs), 2)}
     new_id = xadd(key,new_id,field) 
+    print(new_id)
+    if new_id == "Error code 01":
+        return "-ERR The ID specified in XADD must be greater than 0-0\r\n"
+    elif new_id == "Error code 02":
+        return "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n"
     return f"${len(new_id)}\r\n{new_id}\r\n"
 
 COMMANDS = {
