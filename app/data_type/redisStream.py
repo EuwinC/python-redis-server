@@ -13,7 +13,7 @@ class Redis_Stream:
     def set_group(self,group_name):
         self.consumer_Group = group_name
 
-    def xadd(self,new_id:str,fields: dict[str,str],entry_id: str) -> str:
+    def xadd(self,new_id:str,fields: dict[str,str]) -> str:
         self.data.append((new_id, fields))
         return new_id
     
@@ -28,13 +28,18 @@ def last_sequence_Number(stream):
     return stream.last_sequence
 
 
-def xadd(key:str,new_id:str,fields: dict[str,str],entry_id: str = "*"):
+def xadd(key:str,new_id:str,fields: dict[str,str]):
     stream = get_stream(key)
     msTime,seq_no = new_id.split("-")
     lmsTime,lseq_no = last_sequence_Number(stream).split("-")
+    if seq_no == "*":
+        if msTime == lmsTime:
+            seq_no = int(lseq_no) + 1
+        else:
+            seq_no = 0
     if int(msTime) == 0 and int(seq_no) == 0:
         return "Error code 01"
     if (int(lmsTime) == int(msTime) and int(lseq_no) >= int(seq_no)) or int(lmsTime) > int(msTime):
         return "Error code 02"
-    stream.last_sequence = new_id
-    return stream.xadd(new_id,fields,entry_id)
+    stream.last_sequence = f"{msTime}-{seq_no}"
+    return stream.xadd(f"{msTime}-{seq_no}",fields)
