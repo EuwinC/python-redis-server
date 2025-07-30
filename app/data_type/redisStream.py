@@ -1,11 +1,16 @@
 from datetime import datetime
 from typing import Dict, List, Optional
+import asyncio
 
 class Redis_Stream:
     def __init__(self, key: str):
         self.key = key
         self.data: Dict[int, Dict[int, Dict[str, str]]] = {}  # {timestamp: {seq_no: fields}}
         self.timestamp_list: List[int] = []  # Ordered list of timestamps
+        self._update_event = asyncio.Event()
+        
+    def clear_update(self) -> None:
+        self._update_event.clear()
 
     def __len__(self) -> int:
         return sum(len(seqs) for seqs in self.data.values())
@@ -15,6 +20,7 @@ class Redis_Stream:
             self.data[timestamp] = {}
             self.timestamp_list.append(timestamp)
         self.data[timestamp][seq_no] = fields
+        self._update_event.set()
         return f"{timestamp}-{seq_no}"
 
     def timestamp_index(self, timestamp: int) -> int:
@@ -120,20 +126,17 @@ def xrange(key: str, start_time: str, end_time: Optional[str] = None) -> List[Li
 
 
 
-def xread(keys: List[str], data_ids: List[str]) -> str:
+async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = None) -> str:
     """
     XREAD streams <key> [<key> ...] <id> [<id> ...]
     returns an array of [ stream, [ [id, [field, value...]] ... ] ] per key.
-    """
-    # Top‐level RESP array with one element per stream
-    resp = f"*{len(keys)}\r\n"
-
-    for key, data_id in zip(keys, data_ids):
+    """   
+    async def check_stream(key,data_id):
         stream = get_stream(key)
         stream_data = stream.data
-
+        print(key,data_id)
         # Parse the last‐seen ID
-        ms_str, seq_str = data_id.split("-", 1)
+        ms_str, seq_str = data_id.split("-")
         try:
             ms_time = int(ms_str)
         except ValueError:
@@ -160,22 +163,59 @@ def xread(keys: List[str], data_ids: List[str]) -> str:
                     if nxt_seqs:
                         s = nxt_seqs[0]
                         stream_entries.append((f"{nxt_ts}-{s}", stream_data[nxt_ts][s]))
+        return key,stream_entries
+    start_time = asyncio.get_event_loop().time() * 1000
+    timeout = block_ms / 1000.0 if block_ms is not None else 0
+    streams = [get_stream(key) for key in keys]
+    for stream in streams:
+        stream.clear_update()
+    
+    while True:
+        resp = f"*{len(keys)}\r\n"
+        has_data = False
+        for key, data_id in zip(keys, data_ids):    
+            key, stream_entries = await check_stream(key, data_id)     
+            # Now serialize this stream’s block
+            resp += f"*2\r\n"                     # [ key, entries ]
+            resp += f"${len(key)}\r\n{key}\r\n"
+            resp += f"*{len(stream_entries)}\r\n"
+            for msg_id, fields in stream_entries:
+                has_data = True
+                resp += f"*2\r\n"               # [ id, [ field,value... ] ]
+                resp += f"${len(msg_id)}\r\n{msg_id}\r\n"
+                resp += f"*{len(fields) * 2}\r\n"
+                for fname, fval in fields.items():
+                    resp += f"${len(fname)}\r\n{fname}\r\n"
+                    resp += f"${len(fval)}\r\n{fval}\r\n"
 
-        # Now serialize this stream’s block
-        resp += f"*2\r\n"                     # [ key, entries ]
-        resp += f"${len(key)}\r\n{key}\r\n"
-        resp += f"*{len(stream_entries)}\r\n"
-        for msg_id, fields in stream_entries:
-            resp += f"*2\r\n"               # [ id, [ field,value... ] ]
-            resp += f"${len(msg_id)}\r\n{msg_id}\r\n"
-            resp += f"*{len(fields) * 2}\r\n"
-            for fname, fval in fields.items():
-                resp += f"${len(fname)}\r\n{fname}\r\n"
-                resp += f"${len(fval)}\r\n{fval}\r\n"
+        if has_data or block_ms is None:
+            return resp
+        # If timed out, return nil
+        if (asyncio.get_event_loop().time() * 1000) - start_time >= block_ms:
+            return "$-1\r\n"
+        elapsed = (asyncio.get_event_loop().time() * 1000) - start_time
+        remaining = max(0, timeout - (elapsed / 1000.0))
+        # Wrap each wait() in a Task
+        tasks = [asyncio.create_task(s._update_event.wait()) for s in streams]
+        done, pending = await asyncio.wait(
+            tasks,
+            return_when=asyncio.FIRST_COMPLETED,
+            timeout=remaining
+        )
+        # Cancel any still‐pending waits
+        for t in pending:
+            t.cancel()
+        # Clear events on streams that actually fired
+        for s in streams:
+            if s._update_event.is_set():
+                s.clear_update()
+        # If we timed out (no tasks done), return nil bulk
+        if not done:
+            return "$-1\r\n"   
 
-    return resp
 
 if __name__ == "__main__":    
+
     xadd("apple", "0-1", {"temperature": "0"})
     xadd("blueberry", "0-2", {"temperature": "1"})
     xread(['apple', "blueberry"], ["0-0" ,"0-1"])

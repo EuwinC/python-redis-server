@@ -89,10 +89,14 @@ def xrange_func(args):
     return arr
 
 def xread_func(args):
-    datatype = args[0]
-    keys = args[1:len(args)//2+1]
-    data_ids = args[len(args)//2+1:]
-    arr = xread(keys,data_ids)
+    if args[0].lower() == "block":
+        keys = args[3:(len(args)-3)//2+3]
+        data_ids = args[(len(args)-3)//2+3:]
+        arr = xread(keys,data_ids,int(args[1]))
+    else:
+        keys = args[1:len(args)//2+1]
+        data_ids = args[len(args)//2+1:]
+        arr = xread(keys,data_ids)
     return arr
 
 COMMANDS = {
