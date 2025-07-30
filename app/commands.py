@@ -1,8 +1,8 @@
 from datetime import datetime
-from app.database import Redis_List
 import asyncio
-from app.kvstore import store
-
+from app.data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, lpop_n, blpop
+from app.data_type.redisStream import check_if_stream, xadd
+from app.data_type.kvstore import store
 def ping_func(args):
     return "+PONG\r\n"
 
@@ -23,99 +23,61 @@ def get_func(args):
 
 def type_func(args):
     key = args[0]
-    if key in store:
-        if isinstance(store[key][0],str):
-            return "+string\r\n"
+    t = store.get_type(key)
+    if t == "string":
+        return "+string\r\n"
+    if check_if_lists(key):
+        return "+lists\r\n"
+    if check_if_stream(key):
+        return "+stream\r\n"
     return "+none\r\n"
 
 #List functions
-redis_list = dict() #[list_name:redis_list]
 def rpush_func(args):
-    key = args[0]
-    if key not in redis_list:
-        redis_list[key] = Redis_List(key)
-    for i in range(1,len(args)):
-        redis_list[key].append_right(args[i])
-    length = redis_list[key].get_element_length()
-    return f":{length}\r\n" 
+    cnt = rpush(args[0], *args[1:])
+    return f":{cnt}\r\n"
 
 def lpush_func(args):
-    key = args[0]
-    if key not in redis_list:
-        redis_list[key] = Redis_List(key)
-    for i in range(1,len(args)):
-        redis_list[key].append_left(args[i])
-    length = redis_list[key].get_element_length()
-    return f":{length}\r\n" 
+    cnt = lpush(args[0], *args[1:])
+    return f":{cnt}\r\n"
 
 def llen_func(args):
-    key = args[0]
-    if key not in redis_list:
-        return f":0\r\n"
-    length = redis_list[key].get_element_length()
-    return f":{length}\r\n" 
+    return f":{llen(args[0])}\r\n"
 
-def lrange_func(args): #array_name, left index, right index
-    key = args[0]
-    start, stop = int(args[1]), int(args[2])
-    if key not in redis_list:
-        return f"*0\r\n"
-    length = redis_list[key].get_element_length()
-    if start < 0:
-        start = length + start
-    if stop < 0:
-        stop = length + stop    
-    if start < 0:
-        start = 0
-    if start >= length or start > stop:
-        return f"*0\r\n"    
-    if stop >= length:
-        stop  = length - 1
-    count = stop - start + 1
-    res = f"*{count}\r\n"
-    for idx in range(start, stop + 1):
-        item = redis_list[key].get_elements(idx)
-        res += f"${len(item)}\r\n{item}\r\n"
+def lrange_func(args):
+    arr = lrange(args[0], int(args[1]), int(args[2]))
+    res = f"*{len(arr)}\r\n"
+    for e in arr:
+        res += f"${len(e)}\r\n{e}\r\n"
     return res
 
 def lpop_func(args):
-    key = args[0]
-    # single‐element form: LPOP key
     if len(args) == 1:
-        lst = redis_list.get(key)
-        if not lst or lst.get_element_length() == 0:
-            return "$-1\r\n"
-        val = lst.pop_left()
-        return f"${len(val)}\r\n{val}\r\n"
-        remove = len(args[1])
-    # multi‐element form: LPOP key count
-    count = int(args[1])
-    lst = redis_list.get(key)
-    if not lst or lst.get_element_length() == 0:
-        return "*0\r\n"
-    # pop up to `count` items
-    actual = min(count, lst.get_element_length())
-    res = f"*{actual}\r\n"
-    for _ in range(actual):
-        val = lst.pop_left()
-        res += f"${len(val)}\r\n{val}\r\n"
-    return res
+        arr = lpop_n(args[0], 1)
+        return f"${len(arr[0])}\r\n{arr[0]}\r\n" if arr else "$-1\r\n"
+    else:
+        arr = lpop_n(args[0], int(args[1]))
+        res = f"*{len(arr)}\r\n"
+        for e in arr:
+            res += f"${len(e)}\r\n{e}\r\n"
+        return res
 
 async def blpop_func(args):
-    key = args[0]
-    timeout =  float(args[1]) if len(args) > 1 else 0.0
-    lst = redis_list.setdefault(key, Redis_List(key))
-    value = await lst.blpop(timeout)
-    if value is None:
-        # RESP nil array
+    tup = await blpop(args[0], float(args[1]) if len(args)>1 else 0)
+    if not tup:
         return "$-1\r\n"
-    # return [ key, value ]
-    return (
-        f"*2\r\n"
-        f"${len(key)}\r\n{key}\r\n"
-        f"${len(value)}\r\n{value}\r\n"
-    )
+    key, val = tup
+    return f"*2\r\n${len(key)}\r\n{key}\r\n${len(val)}\r\n{val}\r\n"
 
+#Stream functions
+def xadd_func(args):
+    key = args[0]
+    new_id = args[1]
+    field = dict() #field_name:field_val
+    pairs = args[2:]
+    field = {pairs[i]: pairs[i+1] for i in range(0, len(pairs), 2)}
+    new_id = xadd(key,new_id,field) 
+    return f"${len(new_id)}\r\n{new_id}\r\n"
 
 COMMANDS = {
     "ping":   ping_func,
@@ -129,6 +91,7 @@ COMMANDS = {
     "lpop": lpop_func,
     "blpop": blpop_func,
     "type": type_func,
+    "xadd": xadd_func,
 }
 
 def redis_command(cmd, args):
@@ -140,7 +103,7 @@ def redis_command(cmd, args):
 
 
 if __name__ == "__main__":
-    print(redis_command("set", ['apple', 'mango', 'px', '100']))
+    print(redis_command("xadd", ['mango', '0-1', 'foo', 'bar']))
     print(redis_command("get",["apple"]))
             
         

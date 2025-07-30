@@ -49,18 +49,9 @@ class KVStore:
             self._data[key] = ent
         return ent.value
 
-    # list wrappers
-    def rpush(self, key, *vals):
-        lst = self.ensure_list(key)
-        for v in vals:
-            lst.append(v)
-        return len(lst)
-
-    def lpop(self, key):
-        lst = self.ensure_list(key)
-        return lst.popleft() if lst else None
-
-    # ... and so on for LPUSH, LLEN, LRANGE, XADD, XREAD, etc.
-
 # then instantiate a global store
 store = KVStore()
+
+def get_store():
+    return store._data
+
