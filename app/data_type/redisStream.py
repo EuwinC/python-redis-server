@@ -134,18 +134,24 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
     async def check_stream(key,data_id):
         stream = get_stream(key)
         stream_data = stream.data
-        print(key,data_id)
         # Parse the last‐seen ID
-        ms_str, seq_str = data_id.split("-")
-        try:
-            ms_time = int(ms_str)
-        except ValueError:
-            ms_time = 0
-        try:
-            seq_no_int = int(seq_str)
-        except ValueError:
-            seq_no_int = 0
-
+        if data_id == "$":
+            if stream.timestamp_list:
+                last_ts = stream.timestamp_list[-1]
+                last_seq = max(stream.data[last_ts].keys(), default=0)
+                ms_time, seq_no_int = last_ts, last_seq
+            else:
+                ms_time, seq_no_int = 0, 0
+        else:
+            ms_str, seq_str = data_id.split("-", 1)
+            try:
+                ms_time = int(ms_str)
+            except ValueError:
+                ms_time = 0
+            try:
+                seq_no_int = int(seq_str)
+            except ValueError:
+                seq_no_int = 0
         # Collect **only** the next message for this stream
         stream_entries: list[tuple[str, dict[str, str]]] = []
         if ms_time in stream_data:
