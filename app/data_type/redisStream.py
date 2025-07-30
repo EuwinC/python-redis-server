@@ -79,16 +79,16 @@ def xrange(key: str, start_time: str, end_time: Optional[str] = None) -> List[Li
     
     start_split  = start_time.split("-")
     end_split  = end_time.split("-")
-    if len(start_split) == 2:
-        start_timestamp, start_seq_no = int(start_split[0]),int(start_split[1])
-    elif start_time == "-":
+    if start_time == "-":
         start_timestamp, start_seq_no = int(stream.timestamp_list[0]),0
+    elif len(start_split) == 2:
+        start_timestamp, start_seq_no = int(start_split[0]),int(start_split[1])
     else:
         start_timestamp, start_seq_no = int(start_split[0]),0
-    if len(end_split) == 2:
-        end_timestamp, end_seq_no = int(end_split[0]),int(end_split[1])
-    elif end_time == "+":
+    if end_time == "+":
         end_timestamp, end_seq_no = int(stream.timestamp_list[-1]),float("inf")
+    elif len(end_split) == 2:
+        end_timestamp, end_seq_no = int(end_split[0]),int(end_split[1])
     else:
         end_timestamp, end_seq_no = int(end_split[0]),float("inf")
     start_idx = stream.timestamp_index(start_timestamp)
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     xadd("123", "124-1", {"abc": "cdefgh"})
     xadd("123", "123-5", {"abc": "cdefghi"})
     xadd("123", "124-3", {"abc": "cdefghij"})
-    result = xrange("123", "123", "124")
+    result = xrange("123", "-", "124")
     for timestamp_data in result:
         for entry in timestamp_data:
             print(entry)
