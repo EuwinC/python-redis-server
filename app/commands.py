@@ -89,8 +89,10 @@ def xrange_func(args):
     return arr
 
 def xread_func(args):
-    datatype,key,data_id = args
-    arr = xread(key,data_id)
+    datatype = args[0]
+    keys = args[1:len(args)//2+1]
+    data_ids = args[len(args)//2+1:]
+    arr = xread(keys,data_ids)
     return arr
 
 COMMANDS = {

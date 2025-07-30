@@ -118,69 +118,67 @@ def xrange(key: str, start_time: str, end_time: Optional[str] = None) -> List[Li
 
     return res
 
-def xread(key, data_id):
-    stream = get_stream(key)
-    stream_data = stream.data
 
-    # split as strings...
-    ms_str, seq_str = data_id.split("-", 1)
 
-    # ...then convert to ints for keys/lookups
-    try:
-        ms_time = int(ms_str)
-    except ValueError:
-        ms_time = 0
-    try:
-        seq_no_int = int(seq_str)
-    except ValueError:
-        seq_no_int = 0
+def xread(keys: List[str], data_ids: List[str]) -> str:
+    """
+    XREAD streams <key> [<key> ...] <id> [<id> ...]
+    returns an array of [ stream, [ [id, [field, value...]] ... ] ] per key.
+    """
+    # Top‐level RESP array with one element per stream
+    resp = f"*{len(keys)}\r\n"
 
-    entries = []
-    # Check if ms_time exists in stream_data and has entries
-    if ms_time in stream_data:
-        valid_seqs = sorted(stream_data[ms_time].keys())  # Get sorted sequence numbers
-        # Find the next sequence number greater than seq_no_int
-        next_seq_no = next((x for x in valid_seqs if x > seq_no_int), None)
-        if next_seq_no is not None:
-            # Found a valid sequence number in the current timestamp
-            message_id = f"{ms_time}-{next_seq_no}"
-            fields = stream_data[ms_time][next_seq_no]
-            entries.append((message_id, fields))
-        else:
-            # No valid sequence number in current ms_time, try next timestamp
-            try:
-                timestamp_list = stream.timestamp_list
-                current_index = stream.timestamp_index(ms_time)
-                if current_index + 1 < len(timestamp_list):
-                    next_ms_time = timestamp_list[current_index + 1]
-                    valid_seqs = sorted(stream_data[next_ms_time].keys())
-                    next_seq_no = valid_seqs[0]  # Take the first sequence number
-                    message_id = f"{next_ms_time}-{next_seq_no}"
-                    fields = stream_data[next_ms_time][next_seq_no]
-                    entries.append((message_id, fields))
-            except (IndexError, KeyError):
-                pass  # No next timestamp or entries, return empty entries
+    for key, data_id in zip(keys, data_ids):
+        stream = get_stream(key)
+        stream_data = stream.data
 
-    # Format response in Redis protocol
-    if not entries:
-        return f"*1\r\n*2\r\n${len(key)}\r\n{key}\r\n*0\r\n"
-    
-    resp = f"*1\r\n"  # One stream
-    resp += f"*2\r\n"  # Stream key and entries
-    resp += f"${len(key)}\r\n{key}\r\n"  # Stream key
-    resp += f"*{len(entries)}\r\n"  # Number of entries
-    for message_id, fields in entries:
-        resp += f"*2\r\n"  # Message ID and fields
-        resp += f"${len(message_id)}\r\n{message_id}\r\n"
-        resp += f"*{len(fields)*2}\r\n"  # Number of field-value pairs
-        for fname, fval in fields.items():
-            resp += f"${len(fname)}\r\n{fname}\r\n"
-            resp += f"${len(fval)}\r\n{fval}\r\n"
-    
+        # Parse the last‐seen ID
+        ms_str, seq_str = data_id.split("-", 1)
+        try:
+            ms_time = int(ms_str)
+        except ValueError:
+            ms_time = 0
+        try:
+            seq_no_int = int(seq_str)
+        except ValueError:
+            seq_no_int = 0
+
+        # Collect **only** the next message for this stream
+        stream_entries: list[tuple[str, dict[str, str]]] = []
+        if ms_time in stream_data:
+            seqs = sorted(stream_data[ms_time].keys())
+            # next seq in same timestamp
+            next_seq = next((s for s in seqs if s > seq_no_int), None)
+            if next_seq is not None:
+                stream_entries.append((f"{ms_time}-{next_seq}", stream_data[ms_time][next_seq]))
+            else:
+                # try the first message in the next timestamp
+                idx = stream.timestamp_index(ms_time)
+                if 0 <= idx + 1 < len(stream.timestamp_list):
+                    nxt_ts = stream.timestamp_list[idx + 1]
+                    nxt_seqs = sorted(stream_data.get(nxt_ts, {}).keys())
+                    if nxt_seqs:
+                        s = nxt_seqs[0]
+                        stream_entries.append((f"{nxt_ts}-{s}", stream_data[nxt_ts][s]))
+
+        # Now serialize this stream’s block
+        resp += f"*2\r\n"                     # [ key, entries ]
+        resp += f"${len(key)}\r\n{key}\r\n"
+        resp += f"*{len(stream_entries)}\r\n"
+        for msg_id, fields in stream_entries:
+            resp += f"*2\r\n"               # [ id, [ field,value... ] ]
+            resp += f"${len(msg_id)}\r\n{msg_id}\r\n"
+            resp += f"*{len(fields) * 2}\r\n"
+            for fname, fval in fields.items():
+                resp += f"${len(fname)}\r\n{fname}\r\n"
+                resp += f"${len(fval)}\r\n{fval}\r\n"
+
     return resp
-if __name__ == "__main__":
-    xadd("raspberry", "0-3", {"temperature": "63"})
-    xread('raspberry', '0-0')
+
+if __name__ == "__main__":    
+    xadd("apple", "0-1", {"temperature": "0"})
+    xadd("blueberry", "0-2", {"temperature": "1"})
+    xread(['apple', "blueberry"], ["0-0" ,"0-1"])
     xadd("123", "0-0", {"abc": "cdef"})
     xadd("123", "123-3", {"abc": "cdefg"})
     xadd("123", "124-1", {"abc": "cdefgh"})
