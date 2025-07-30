@@ -1,7 +1,6 @@
 from datetime import datetime
-import asyncio
 from app.data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, lpop_n, blpop
-from app.data_type.redisStream import check_if_stream, xadd,xrange
+from app.data_type.redisStream import check_if_stream, xadd,xrange,xread
 from app.data_type.kvstore import store
 def ping_func(args):
     return "+PONG\r\n"
@@ -89,6 +88,11 @@ def xrange_func(args):
     arr = xrange(key, start, end)
     return arr
 
+def xread_func(args):
+    datatype,key,data_id = args
+    arr = xread(key,data_id)
+    return arr
+
 COMMANDS = {
     "ping":   ping_func,
     "echo":   echo_func,
@@ -103,6 +107,7 @@ COMMANDS = {
     "type": type_func,
     "xadd": xadd_func,
     "xrange": xrange_func,
+    "xread": xread_func,
 }
 
 def redis_command(cmd, args):
