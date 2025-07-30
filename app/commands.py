@@ -1,7 +1,7 @@
 from datetime import datetime
 import asyncio
 from app.data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, lpop_n, blpop
-from app.data_type.redisStream import check_if_stream, xadd
+from app.data_type.redisStream import check_if_stream, xadd,xrange
 from app.data_type.kvstore import store
 def ping_func(args):
     return "+PONG\r\n"
@@ -78,12 +78,16 @@ def xadd_func(args):
     field = {pairs[i]: pairs[i+1] for i in range(0, len(pairs), 2)}
         
     new_id = xadd(key,new_id,field) 
-    print(new_id)
     if new_id == "Error code 01":
         return "-ERR The ID specified in XADD must be greater than 0-0\r\n"
     elif new_id == "Error code 02":
         return "-ERR The ID specified in XADD is equal or smaller than the target stream top item\r\n"
     return f"${len(new_id)}\r\n{new_id}\r\n"
+
+def xrange_func(args):
+    key,start,end = args
+    arr = xrange(key, start, end)
+    return arr
 
 COMMANDS = {
     "ping":   ping_func,
@@ -98,6 +102,7 @@ COMMANDS = {
     "blpop": blpop_func,
     "type": type_func,
     "xadd": xadd_func,
+    "xrange": xrange_func,
 }
 
 def redis_command(cmd, args):
