@@ -138,20 +138,17 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
         if data_id == "$":
             if stream.timestamp_list:
                 last_ts = stream.timestamp_list[-1]
-                last_seq = max(stream.data[last_ts].keys(), default=0)
+                last_seq = max(stream_data.get(last_ts, {}).keys(), default=0)
                 ms_time, seq_no_int = last_ts, last_seq
             else:
                 ms_time, seq_no_int = 0, 0
         else:
-            ms_str, seq_str = data_id.split("-", 1)
             try:
+                ms_str, seq_str = data_id.split("-", 1)
                 ms_time = int(ms_str)
-            except ValueError:
-                ms_time = 0
-            try:
                 seq_no_int = int(seq_str)
-            except ValueError:
-                seq_no_int = 0
+            except (ValueError, IndexError):
+                ms_time, seq_no_int = 0, 0
         # Collect **only** the next message for this stream
         stream_entries: list[tuple[str, dict[str, str]]] = []
         if ms_time in stream_data:
@@ -169,7 +166,20 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
                     if nxt_seqs:
                         s = nxt_seqs[0]
                         stream_entries.append((f"{nxt_ts}-{s}", stream_data[nxt_ts][s]))
+                        
         return key,stream_entries
+    if block_ms == 0:
+        for i, did in enumerate(data_ids):
+            if did == "$":
+                stream = get_stream(keys[i])
+                if stream.timestamp_list:
+                    last_ts = stream.timestamp_list[-1]
+                    last_seq = max(stream.data.get(last_ts, {}).keys(), default=0)
+                else:
+                    last_ts, last_seq = 0, 0
+                data_ids[i] = f"{last_ts}-{last_seq}"    
+    
+    
     start_time = asyncio.get_event_loop().time() * 1000
     if block_ms is None:
         timeout = 0.0
