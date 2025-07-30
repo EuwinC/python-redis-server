@@ -165,7 +165,13 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
                         stream_entries.append((f"{nxt_ts}-{s}", stream_data[nxt_ts][s]))
         return key,stream_entries
     start_time = asyncio.get_event_loop().time() * 1000
-    timeout = block_ms / 1000.0 if block_ms is not None else 0
+    if block_ms is None:
+        timeout = 0.0
+    elif block_ms == 0:
+        timeout = None
+    else:
+        timeout = block_ms / 1000.0
+        
     streams = [get_stream(key) for key in keys]
     for stream in streams:
         stream.clear_update()
@@ -188,19 +194,17 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
                     resp += f"${len(fname)}\r\n{fname}\r\n"
                     resp += f"${len(fval)}\r\n{fval}\r\n"
 
-        if has_data or block_ms is None:
+        if has_data:
             return resp
-        # If timed out, return nil
-        if (asyncio.get_event_loop().time() * 1000) - start_time >= block_ms:
+        if block_ms is None:
             return "$-1\r\n"
-        elapsed = (asyncio.get_event_loop().time() * 1000) - start_time
-        remaining = max(0, timeout - (elapsed / 1000.0))
+        # If timed out, return nil
         # Wrap each wait() in a Task
         tasks = [asyncio.create_task(s._update_event.wait()) for s in streams]
         done, pending = await asyncio.wait(
             tasks,
             return_when=asyncio.FIRST_COMPLETED,
-            timeout=remaining
+            timeout=timeout
         )
         # Cancel any still‐pending waits
         for t in pending:
