@@ -5,6 +5,7 @@ class Redis_Stream:
         self.last_delivered_id = None
         self.pending_ids = None
         self.data = []
+        self.last_sequence = float("-inf")
 
     def __len__(self) -> int:
         return len(self.data)
@@ -15,6 +16,7 @@ class Redis_Stream:
     def xadd(self,new_id:str,fields: dict[str,str],entry_id: str) -> str:
         self.data.append((new_id, fields))
         return new_id
+    
 streams: dict[str, Redis_Stream] = {}
 def get_stream(key:str)-> Redis_Stream:
     return streams.setdefault(key, Redis_Stream(key))    
@@ -22,6 +24,16 @@ def get_stream(key:str)-> Redis_Stream:
 def check_if_stream(key):
     return key in streams
 
+def last_sequence_Number(stream):
+    return stream.last_sequence
+
+
 def xadd(key:str,new_id:str,fields: dict[str,str],entry_id: str = "*"):
     stream = get_stream(key)
+    msTime,seq_no = new_id.split(str="_", num=1)
+    if int(msTime) == 0 and int(seq_no) == 0:
+        return "ERR The ID specified in XADD must be greater than 0-0"
+    if last_sequence_Number(stream) >= seq_no:
+        return "ERR The ID specified in XADD is equal or smaller than the target stream top item"
+    stream.last_sequence = seq_no
     return stream.xadd(new_id,fields,entry_id)
