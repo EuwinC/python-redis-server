@@ -1,9 +1,16 @@
 import socket
-import asyncio, inspect
+import asyncio
+import inspect
 from app.convert_commands import convert_resp
 from app.commands import redis_command
 
 async def handle_client(reader, writer):
+    # Client-specific transaction state
+    client_state = {
+        'multi_event': asyncio.Event(),
+        'exec_event': [],
+    }
+    client_state['multi_event'].set()  # Initially not in transaction
     try:
         while True:
             data = await reader.read(1024)
@@ -13,13 +20,20 @@ async def handle_client(reader, writer):
             if not cmd:
                 resp = "-ERR invalid RESP format\r\n"
             else:
-                result = redis_command(cmd, args)
-                # if the command func was async we get a coroutine back:
-                if inspect.iscoroutine(result):
-                    result = await result
-                resp = result
+                try:
+                    # Pass client-specific state to redis_command
+                    result = redis_command(cmd, args, client_state)
+                    if inspect.iscoroutine(result):
+                        result = await result
+                    resp = result
+                except Exception as e:
+                    resp = f"-ERR server error: {str(e)}\r\n"
             writer.write(resp.encode() if isinstance(resp, str) else resp)
             await writer.drain()
+    except Exception as e:
+        print(f"Client error: {e}")
+        writer.write(f"-ERR client error: {str(e)}\r\n".encode())
+        await writer.drain()
     finally:
         writer.close()
         await writer.wait_closed()

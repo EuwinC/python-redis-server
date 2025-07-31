@@ -31,7 +31,7 @@ class Redis_Stream:
 
 streams: Dict[str, Redis_Stream] = {}
 
-def timestamp_generation(stream_data,time):
+def timestamp_generation(stream_data, time):
     if time == "*":
         ms_time = int(datetime.now().timestamp() * 1000)
         seq_no = max(stream_data.get(ms_time, {}).keys(), default=-1) + 1
@@ -46,10 +46,10 @@ def timestamp_generation(stream_data,time):
             seq_no = max(stream_data.get(ms_time, {}).keys(), default=-1) + 1
             if ms_time == 0 and seq_no == 0:
                 seq_no = 1 
+        else:
+            seq_no = int(seq_no) 
 
-        seq_no = int(seq_no) 
-
-    return ms_time,seq_no
+    return ms_time, seq_no
 
 def get_stream(key: str) -> Redis_Stream:
     return streams.setdefault(key, Redis_Stream(key))
@@ -61,7 +61,7 @@ def xadd(key: str, data_id: str, fields: Dict[str, str]) -> str:
     stream = get_stream(key)
     stream_data = stream.data
 
-    ms_time,seq_no = timestamp_generation(stream_data,data_id)
+    ms_time, seq_no = timestamp_generation(stream_data, data_id)
 
     # Check for invalid timestamp or sequence number
     if ms_time < 0 or seq_no < 0:
@@ -79,62 +79,66 @@ def xadd(key: str, data_id: str, fields: Dict[str, str]) -> str:
 
     return stream.xadd(ms_time, seq_no, fields)
 
-def xrange(key: str, start_time: str, end_time: Optional[str] = None) -> List[List[str]]:
+def xrange(key: str, start_time: str, end_time: Optional[str] = None) -> str:
     stream = get_stream(key)
     stream_data = stream.data
     if not end_time:
         end_time = start_time
 
-    if start_time == "-":
-        start_timestamp, start_seq_no = int(stream.timestamp_list[0]),0
-    else:
-        start_timestamp, start_seq_no = timestamp_generation(stream_data,start_time)
-        start_seq_no = 0 if start_seq_no == -1 else start_seq_no
-    if end_time == "+":
-        end_timestamp, end_seq_no = int(stream.timestamp_list[-1]),float("inf")
-    else:
-        end_timestamp, end_seq_no = timestamp_generation(stream_data,end_time)
-        end_seq_no = float("inf") if end_seq_no == -1 else end_seq_no
+    # Handle empty stream
+    if not stream.timestamp_list:
+        return "*0\r\n"
+
+    try:
+        if start_time == "-":
+            start_timestamp, start_seq_no = int(stream.timestamp_list[0]), 0
+        else:
+            start_timestamp, start_seq_no = timestamp_generation(stream_data, start_time)
+            start_seq_no = 0 if start_seq_no == -1 else start_seq_no
+
+        if end_time == "+":
+            end_timestamp, end_seq_no = int(stream.timestamp_list[-1]), float("inf")
+        else:
+            end_timestamp, end_seq_no = timestamp_generation(stream_data, end_time)
+            end_seq_no = float("inf") if end_seq_no == -1 else end_seq_no
         
-    start_idx = stream.timestamp_index(start_timestamp)
-    end_idx = stream.timestamp_index(end_timestamp)
+        print(f"XRANGE: key={key}, start={start_timestamp}-{start_seq_no}, end={end_timestamp}-{end_seq_no}")
+        start_idx = stream.timestamp_index(start_timestamp)
+        end_idx = stream.timestamp_index(end_timestamp)
 
-    if start_idx == -1 or end_idx == -1:
-        return []  # Timestamps not found
+        if start_idx == -1 or end_idx == -1:
+            return "*0\r\n"  # Timestamps not found
 
-# Collect all entries in the range
-    entries = []
-    for i in range(start_idx, end_idx + 1):
-        timestamp = stream.timestamp_list[i]
-        start_seq = start_seq_no if i == start_idx else 0
-        end_seq = end_seq_no if i == end_idx else float("inf")
+        # Collect all entries in the range
+        entries = []
+        for i in range(start_idx, end_idx + 1):
+            timestamp = stream.timestamp_list[i]
+            start_seq = start_seq_no if i == start_idx else 0
+            end_seq = end_seq_no if i == end_idx else float("inf")
 
-        for seq_no in sorted(stream_data.get(timestamp, {}).keys()):
-            if start_seq <= seq_no <= end_seq:
-                entries.append((timestamp, seq_no))
+            for seq_no in sorted(stream_data.get(timestamp, {}).keys()):
+                if start_seq <= seq_no <= end_seq:
+                    entries.append((timestamp, seq_no))
 
-    # Build RESP array
-    res = f"*{len(entries)}\r\n"
-    for timestamp, seq_no in entries:
-        message_id = f"{timestamp}-{seq_no}"
-        fields = stream_data[timestamp][seq_no]
-        res += f"*2\r\n${len(message_id)}\r\n{message_id}\r\n*{len(fields)*2}\r\n"
-        for key, value in fields.items():
-            res += f"${len(key)}\r\n{key}\r\n${len(value)}\r\n{value}\r\n"
+        # Build RESP array
+        res = f"*{len(entries)}\r\n"
+        for timestamp, seq_no in entries:
+            message_id = f"{timestamp}-{seq_no}"
+            fields = stream_data[timestamp][seq_no]
+            res += f"*2\r\n${len(message_id)}\r\n{message_id}\r\n*{len(fields)*2}\r\n"
+            for key, value in fields.items():
+                res += f"${len(key)}\r\n{key}\r\n${len(value)}\r\n{value}\r\n"
 
-    return res
+        return res
+    except Exception as e:
+        print(f"Error in xrange: {str(e)}")
+        raise
 
-
-
-async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = None) -> str:
-    """
-    XREAD streams <key> [<key> ...] <id> [<id> ...]
-    returns an array of [ stream, [ [id, [field, value...]] ... ] ] per key.
-    """   
-    async def check_stream(key,data_id):
+async def xread(keys: List[str], data_ids: List[str], block_ms: Optional[int] = None) -> str:
+    async def check_stream(key, data_id):
         stream = get_stream(key)
         stream_data = stream.data
-        # Parse the last‐seen ID
+        # Parse the last-seen ID
         if data_id == "$":
             if stream.timestamp_list:
                 last_ts = stream.timestamp_list[-1]
@@ -149,16 +153,16 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
                 seq_no_int = int(seq_str)
             except (ValueError, IndexError):
                 ms_time, seq_no_int = 0, 0
-        # Collect **only** the next message for this stream
+        # Collect only the next message for this stream
         stream_entries: list[tuple[str, dict[str, str]]] = []
         if ms_time in stream_data:
             seqs = sorted(stream_data[ms_time].keys())
-            # next seq in same timestamp
+            # Next seq in same timestamp
             next_seq = next((s for s in seqs if s > seq_no_int), None)
             if next_seq is not None:
                 stream_entries.append((f"{ms_time}-{next_seq}", stream_data[ms_time][next_seq]))
             else:
-                # try the first message in the next timestamp
+                # Try the first message in the next timestamp
                 idx = stream.timestamp_index(ms_time)
                 if 0 <= idx + 1 < len(stream.timestamp_list):
                     nxt_ts = stream.timestamp_list[idx + 1]
@@ -167,7 +171,8 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
                         s = nxt_seqs[0]
                         stream_entries.append((f"{nxt_ts}-{s}", stream_data[nxt_ts][s]))
                         
-        return key,stream_entries
+        return key, stream_entries
+
     if block_ms == 0:
         for i, did in enumerate(data_ids):
             if did == "$":
@@ -178,7 +183,6 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
                 else:
                     last_ts, last_seq = 0, 0
                 data_ids[i] = f"{last_ts}-{last_seq}"    
-    
     
     start_time = asyncio.get_event_loop().time() * 1000
     if block_ms is None:
@@ -197,13 +201,13 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
         has_data = False
         for key, data_id in zip(keys, data_ids):    
             key, stream_entries = await check_stream(key, data_id)     
-            # Now serialize this stream’s block
+            # Serialize this stream’s block
             resp += f"*2\r\n"                     # [ key, entries ]
             resp += f"${len(key)}\r\n{key}\r\n"
             resp += f"*{len(stream_entries)}\r\n"
             for msg_id, fields in stream_entries:
                 has_data = True
-                resp += f"*2\r\n"               # [ id, [ field,value... ] ]
+                resp += f"*2\r\n"               # [ id, [ field, value... ] ]
                 resp += f"${len(msg_id)}\r\n{msg_id}\r\n"
                 resp += f"*{len(fields) * 2}\r\n"
                 for fname, fval in fields.items():
@@ -215,14 +219,13 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
         if block_ms is None:
             return "$-1\r\n"
         # If timed out, return nil
-        # Wrap each wait() in a Task
         tasks = [asyncio.create_task(s._update_event.wait()) for s in streams]
         done, pending = await asyncio.wait(
             tasks,
             return_when=asyncio.FIRST_COMPLETED,
             timeout=timeout
         )
-        # Cancel any still‐pending waits
+        # Cancel any still-pending waits
         for t in pending:
             t.cancel()
         # Clear events on streams that actually fired
@@ -232,20 +235,3 @@ async def xread(keys: List[str], data_ids: List[str],block_ms: Optional[int] = N
         # If we timed out (no tasks done), return nil bulk
         if not done:
             return "$-1\r\n"   
-
-
-if __name__ == "__main__":    
-
-    xadd("apple", "0-1", {"temperature": "0"})
-    xadd("blueberry", "0-2", {"temperature": "1"})
-    xread(['apple', "blueberry"], ["0-0" ,"0-1"])
-    xadd("123", "0-0", {"abc": "cdef"})
-    xadd("123", "123-3", {"abc": "cdefg"})
-    xadd("123", "124-1", {"abc": "cdefgh"})
-    xadd("123", "123-5", {"abc": "cdefghi"})
-    xadd("123", "124-3", {"abc": "cdefghij"})
-    xread("123","124-2")
-    result = xrange("123", "-", "124")
-    for timestamp_data in result:
-        for entry in timestamp_data:
-            print(entry)
