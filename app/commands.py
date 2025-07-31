@@ -158,10 +158,11 @@ def redis_command(cmd, args):
         for r in replies:
             out += r
         return out
-    if not _multi_event.is_set():
+    if not _multi_event.is_set() and key != "get":
         exec_event.append([cmd, args])
         return f"+QUEUED\r\n"
-    fn = COMMANDS.get(cmd.lower())
+
+    fn = COMMANDS.get(key)
     if not fn:
         return b"-ERR unknown command or invalid arguments\r\n"
     return fn(args)
