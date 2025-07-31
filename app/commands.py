@@ -5,6 +5,7 @@ import app.data_type.redisKey as rkey
 import asyncio
 _multi_event = asyncio.Event()
 _multi_event.set()
+exec_event = []
 # Key Functions
 def ping_func(args):
     return "+PONG\r\n"
@@ -139,8 +140,17 @@ COMMANDS = {
 def redis_command(cmd, args):
     print(cmd,args)
     if cmd.lower() ==  "multi" and not _multi_event.is_set:
-        return f"+QUEUED\r\d"
-    fn = COMMANDS.get(cmd.lower())
+        fn = f"+QUEUED\r\d"
+        exec_event.append([cmd,args])
+    elif cmd.lower() == "exec":
+        if not _multi_event.is_set:
+            for old_cmd,old_args in exec_event:
+                redis_command(old_cmd,old_args)
+            exec_event = []
+        else:
+            return b"-ERR EXEC without MULTI\r\n"
+    else:
+        fn = COMMANDS.get(cmd.lower())
     
     if not fn:
         return b"-ERR unknown command or invalid arguments\r\n"
