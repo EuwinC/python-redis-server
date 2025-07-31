@@ -139,19 +139,29 @@ COMMANDS = {
 
 def redis_command(cmd, args):
     print(cmd,args)
-    if cmd.lower() ==  "multi" and not _multi_event.is_set:
-        fn = f"+QUEUED\r\d"
-        exec_event.append([cmd,args])
-    elif cmd.lower() == "exec":
-        if not _multi_event.is_set:
-            for old_cmd,old_args in exec_event:
-                redis_command(old_cmd,old_args)
-            exec_event = []
-        else:
-            return b"-ERR EXEC without MULTI\r\n"
-    else:
-        fn = COMMANDS.get(cmd.lower())
-    
+    key = cmd.lower()
+    global exec_event
+    if key == "multi":
+        _multi_event.clear()
+        return "+OK\r\n"
+    if key == "exec":
+        if _multi_event.is_set():
+            return "-ERR EXEC without MULTI\r\n"
+        _multi_event.set()
+        if not exec_event:
+            return "*0\r\n"
+        replies = []
+        for c, a in exec_event:
+            replies.append(redis_command(c, a))
+        exec_event.clear()
+        out = f"*{len(replies)}\r\n"
+        for r in replies:
+            out += r
+        return out
+    if not _multi_event.is_set():
+        exec_event.append([cmd, args])
+        return f"+QUEUED\r\n"
+    fn = COMMANDS.get(cmd.lower())
     if not fn:
         return b"-ERR unknown command or invalid arguments\r\n"
     return fn(args)
