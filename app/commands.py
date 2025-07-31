@@ -16,7 +16,10 @@ def set_func(args):
 
 def get_func(args):
     val = rkey.get(args)
-    return f"${len(val)}\r\n{val}\r\n" if val is not None else "$-1\r\n"
+    if val is None:
+        return "$-1\r\n"
+    s = str(val)
+    return f"${len(s)}\r\n{s}\r\n"
 
 
 def type_func(args):
