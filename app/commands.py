@@ -2,7 +2,9 @@ from datetime import datetime
 from app.data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, lpop_n, blpop
 from app.data_type.redisStream import check_if_stream, xadd,xrange,xread
 import app.data_type.redisKey as rkey
-
+import asyncio
+_multi_event = asyncio.Event()
+_multi_event.set()
 # Key Functions
 def ping_func(args):
     return "+PONG\r\n"
@@ -36,6 +38,8 @@ def type_func(args):
 def inrc_func(args):
     val = rkey.incr(args[0])
     return val
+
+
 #List Functions
 def rpush_func(args):
     cnt = rpush(args[0], *args[1:])
@@ -104,6 +108,15 @@ def xread_func(args):
         arr = xread(keys,data_ids)
     return arr
 
+async def multi_event(args) -> str:
+    global _multi_event
+    if _multi_event.is_set():
+        _multi_event.clear()
+        return "+OK\r\n"
+    else:
+        _multi_event.set()
+        return "+OK\r\n"
+
 COMMANDS = {
     "ping":   ping_func,
     "echo":   echo_func,
@@ -120,11 +133,15 @@ COMMANDS = {
     "xrange": xrange_func,
     "xread": xread_func,
     "incr": inrc_func,
+    "multi": multi_event,
 }
 
 def redis_command(cmd, args):
     print(cmd,args)
+    if cmd.lower() ==  "multi" and not _multi_event.is_set:
+        return f"+QUEUED\r\d"
     fn = COMMANDS.get(cmd.lower())
+    
     if not fn:
         return b"-ERR unknown command or invalid arguments\r\n"
     return fn(args)
