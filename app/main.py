@@ -1,5 +1,6 @@
 import socket
 import asyncio
+import argparse
 import inspect
 from app.convert_commands import convert_resp
 from app.commands import redis_command
@@ -40,7 +41,13 @@ async def handle_client(reader, writer):
 
 async def main():
     print("Logs from your program will appear here!")
-    server = await asyncio.start_server(handle_client, "localhost", 6379)
+    parser = argparse.ArgumentParser(description="Redis server with custom port")
+    parser.add_argument("--port", type=int, default=6379, help="Port to run the server on")
+    args = parser.parse_args()
+    port = args.port
+    print(f"Starting server on port {port}")
+    print("Logs from your program will appear here!")
+    server = await asyncio.start_server(handle_client, "localhost", port)
     async with server:
         await server.serve_forever()
 
