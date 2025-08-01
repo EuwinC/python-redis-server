@@ -61,6 +61,12 @@ class RedisKey:
                 print(f"Error applying transaction for {key}: {str(e)}")
         self._transaction_queue.clear()
         print(f"After transaction: {self._data}")
+        
+    def discard_transaction(self) -> None:
+        # Apply queued transaction updates
+        print(f"Applying transaction: {self._transaction_queue}")
+        self._transaction_queue.clear()
+        print(f"After transaction: {self._data}")
 
     def get_val(self, key: str):
         self._evict_expired()

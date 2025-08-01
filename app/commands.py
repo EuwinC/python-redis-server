@@ -2,7 +2,6 @@ from datetime import datetime
 from app.data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, lpop_n, blpop
 from app.data_type.redisStream import check_if_stream, xadd, xrange, xread
 import app.data_type.redisKey as rkey
-import asyncio
 from typing import List
 
 # Key Functions
@@ -206,6 +205,14 @@ async def redis_command(cmd: str, args: List[str], client_state) -> str:
     print(f"Command: {key}, Args: {args}, Exec Queue: {client_state['exec_event']}, Multi: {client_state['multi_event'].is_set()}")
     if key == "multi":
         return await multi_func(args, client_state)
+    if key == "discard":
+        if client_state['multi_event'].is_set():
+            return "-ERR DISCARD without MULTI\r\n"
+        else:
+            client_state['multi_event'].set() 
+            client_state['exec_event'].clear()
+            rkey.rkey.discard_transaction()    
+        return "+OK\r\n"
     if key == "exec":
         if client_state['multi_event'].is_set():
             return "-ERR EXEC without MULTI\r\n"
