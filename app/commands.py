@@ -202,6 +202,9 @@ COMMANDS = {
 
 async def redis_command(cmd: str, args: List[str], client_state) -> str:
     key = cmd.lower()
+    if cmd == 'info' and args[0].lower() == 'replication':
+        return f"${len(client_state['server_state']['role'])+5}\r\nrole:{client_state['server_state']['role']}\r\n"
+    
     print(f"Command: {key}, Args: {args}, Exec Queue: {client_state['exec_event']}, Multi: {client_state['multi_event'].is_set()}")
     if key == "multi":
         return await multi_func(args, client_state)

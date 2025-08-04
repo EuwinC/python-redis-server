@@ -5,11 +5,14 @@ import inspect
 from app.convert_commands import convert_resp
 from app.commands import redis_command
 
+server_state = {'role': 'master'}
+
 async def handle_client(reader, writer):
     # Client-specific transaction state
     client_state = {
         'multi_event': asyncio.Event(),
         'exec_event': [],
+        'server_state': server_state,
     }
     client_state['multi_event'].set()  # Initially not in transaction
     try:
