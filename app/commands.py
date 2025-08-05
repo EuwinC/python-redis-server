@@ -222,6 +222,14 @@ async def redis_command(cmd: str, args: List[str], client_state) -> str:
     if cmd.lower() == 'replconf' and args:
         if args[0].lower() in ['listening-port', 'capa']:
             return b"+OK\r\n"
+    if cmd.lower() == 'psync' and len(args) == 2:
+        if server_state['role'] == 'master':
+            replid = server_state.get('master_replid', '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb')
+            offset = server_state.get('master_repl_offset', 0)
+            return f"+FULLRESYNC {replid} {offset}\r\n".encode()
+        else:
+            return b"-ERR PSYNC only allowed on master\r\n"
+    
     print(f"Command: {key}, Args: {args}, Exec Queue: {client_state['exec_event']}, Multi: {client_state['multi_event'].is_set()}")
     if key == "multi":
         return await multi_func(args, client_state)

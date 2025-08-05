@@ -72,9 +72,29 @@ async def start_replication(master_host, master_port, server_state, replica_port
         if response != b"+OK\r\n":
             raise Exception("REPLCONF capa failed: expected +OK\r\n")
 
-        # Placeholder for next stage (PSYNC)
-        print("Handshake completed, ready for PSYNC")
+        # Step 4: Send PSYNC ? -1
+        writer.write(b"*3\r\n$5\r\nPSYNC\r\n$1\r\n?\r\n$2\r\n-1\r\n")
+        await writer.drain()
+        response = await reader.read(1024)
+        print(f"Master response to PSYNC: {response.decode()}")
+        if not response.startswith(b"+FULLRESYNC"):
+            raise Exception("PSYNC failed: expected +FULLRESYNC")
         
+        # Parse FULLRESYNC response (e.g., +FULLRESYNC <replid> <offset>)
+        response_str = response.decode()
+        parts = response_str.split()
+        if len(parts) < 3 or parts[0] != "+FULLRESYNC":
+            raise Exception("Invalid FULLRESYNC response")
+        master_replid = parts[1]
+        master_offset = int(parts[2].strip("\r\n"))
+        server_state['master_replid'] = master_replid
+        server_state['master_repl_offset'] = master_offset
+        print(f"Received FULLRESYNC: replid={master_replid}, offset={master_offset}")
+
+        # Placeholder for RDB file (not implemented)
+        # In a real system, read the RDB file here
+        print("Expecting RDB file (skipped for this challenge)")
+
         # Listen for commands from master
         while True:
             data = await reader.read(1024)
