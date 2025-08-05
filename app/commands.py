@@ -219,6 +219,9 @@ async def redis_command(cmd: str, args: List[str], client_state) -> str:
         # Format as RESP bulk string with correct length
         response_bytes = response.encode()
         return f"${len(response_bytes)}\r\n{response}\r\n".encode()
+    if cmd.lower() == 'replconf' and args:
+        if args[0].lower() in ['listening-port', 'capa']:
+            return b"+OK\r\n"
     print(f"Command: {key}, Args: {args}, Exec Queue: {client_state['exec_event']}, Multi: {client_state['multi_event'].is_set()}")
     if key == "multi":
         return await multi_func(args, client_state)

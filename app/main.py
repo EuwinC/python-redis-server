@@ -11,7 +11,7 @@ async def handle_client(reader, writer, server_state):
         'exec_event': [],
         'server_state': server_state
     }
-    client_state['multi_event'].set()  # Initially not in transaction
+    client_state['multi_event'].set()
     try:
         while True:
             data = await reader.read(1024)
@@ -22,7 +22,6 @@ async def handle_client(reader, writer, server_state):
                 resp = "-ERR invalid RESP format\r\n"
             else:
                 try:
-                    # Reject write commands if server is a slave
                     if server_state['role'] == 'slave' and cmd.lower() in ['set', 'del', 'incr', 'decr']:
                         resp = "-ERR write commands not allowed on slave\r\n"
                     else:
@@ -42,22 +41,39 @@ async def handle_client(reader, writer, server_state):
         writer.close()
         await writer.wait_closed()
 
-async def start_replication(master_host, master_port, server_state):
+async def start_replication(master_host, master_port, server_state, replica_port):
     try:
         reader, writer = await asyncio.open_connection(master_host, master_port)
         print(f"Connected to master at {master_host}:{master_port}")
         
-        # Send PING to verify connection
+        # Step 1: Send PING
         writer.write(b"*1\r\n$4\r\nPING\r\n")
         await writer.drain()
         response = await reader.read(1024)
-        print(f"Master response: {response.decode()}")
-        
-        # Send REPLICAOF to configure as slave (simplified)
-        writer.write(b"*3\r\n$9\r\nREPLICAOF\r\n$%d\r\n%s\r\n$%d\r\n%d\r\n" % (
-            len(master_host), master_host.encode(), len(str(master_port)), master_port
+        print(f"Master response to PING: {response.decode()}")
+        if response != b"+PONG\r\n":
+            raise Exception("PING failed: expected +PONG\r\n")
+
+        # Step 2: Send REPLCONF listening-port <port>
+        writer.write(b"*3\r\n$8\r\nREPLCONF\r\n$14\r\nlistening-port\r\n$%d\r\n%d\r\n" % (
+            len(str(replica_port)), replica_port
         ))
         await writer.drain()
+        response = await reader.read(1024)
+        print(f"Master response to REPLCONF listening-port: {response.decode()}")
+        if response != b"+OK\r\n":
+            raise Exception("REPLCONF listening-port failed: expected +OK\r\n")
+
+        # Step 3: Send REPLCONF capa psync2
+        writer.write(b"*3\r\n$8\r\nREPLCONF\r\n$4\r\ncapa\r\n$6\r\npsync2\r\n")
+        await writer.drain()
+        response = await reader.read(1024)
+        print(f"Master response to REPLCONF capa: {response.decode()}")
+        if response != b"+OK\r\n":
+            raise Exception("REPLCONF capa failed: expected +OK\r\n")
+
+        # Placeholder for next stage (PSYNC)
+        print("Handshake completed, ready for PSYNC")
         
         # Listen for commands from master
         while True:
@@ -67,7 +83,6 @@ async def start_replication(master_host, master_port, server_state):
             cmd, args = convert_resp(data)
             if cmd:
                 try:
-                    # Apply replicated commands to local store
                     result = redis_command(cmd, args, {'server_state': server_state})
                     if inspect.iscoroutine(result):
                         await result
@@ -102,15 +117,12 @@ async def main():
             print("Error: --replicaof must be in format 'host port' (e.g., '127.0.0.1 6379')")
             return
     
-    # Initialize server_state
     server_state = {
         'role': 'slave' if master_host else 'master',
         'master_host': master_host,
         'master_port': master_port,
-        'master_repl_offset':'0',
-        'master_replid' : "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
-
-
+        'master_replid': '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb',
+        'master_repl_offset': 0
     }
     
     print(f"Starting server on port {port}")
@@ -119,16 +131,14 @@ async def main():
     else:
         print("Configured as master")
     
-    # Start the server
     server = await asyncio.start_server(
         lambda r, w: handle_client(r, w, server_state),
         "localhost",
         port
     )
     
-    # If slave, start replication
     if master_host and master_port:
-        asyncio.create_task(start_replication(master_host, master_port, server_state))
+        asyncio.create_task(start_replication(master_host, master_port, server_state, port))
     
     async with server:
         await server.serve_forever()
