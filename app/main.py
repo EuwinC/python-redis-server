@@ -106,7 +106,11 @@ async def main():
     server_state = {
         'role': 'slave' if master_host else 'master',
         'master_host': master_host,
-        'master_port': master_port
+        'master_port': master_port,
+        'master_repl_offset':'0',
+        'master_replid' : "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
+
+
     }
     
     print(f"Starting server on port {port}")

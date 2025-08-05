@@ -202,9 +202,23 @@ COMMANDS = {
 
 async def redis_command(cmd: str, args: List[str], client_state) -> str:
     key = cmd.lower()
-    if cmd == 'info' and args[0].lower() == 'replication':
-        return f"${len(client_state['server_state']['role'])+5}\r\nrole:{client_state['server_state']['role']}\r\n"
-    
+    server_state = client_state.get('server_state', {'role': 'master'})
+    if cmd.lower() == 'info' and args and args[0].lower() == 'replication':
+        role = server_state['role']
+        response = f"role:{role}\r\n"
+        if role == 'slave':
+            master_host = server_state['master_host']
+            master_port = server_state['master_port']
+            response += f"master_host:{master_host}\r\nmaster_port:{master_port}\r\n"
+        # Add replication details for master (per test expectation)
+        else:
+            master_replid = server_state.get('master_replid', '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb')
+            master_repl_offset = server_state.get('master_repl_offset', 0)
+            response += f"master_repl_offset:{master_repl_offset}\r\nmaster_replid:{master_replid}\r\n"
+        
+        # Format as RESP bulk string with correct length
+        response_bytes = response.encode()
+        return f"${len(response_bytes)}\r\n{response}\r\n".encode()
     print(f"Command: {key}, Args: {args}, Exec Queue: {client_state['exec_event']}, Multi: {client_state['multi_event'].is_set()}")
     if key == "multi":
         return await multi_func(args, client_state)
