@@ -91,8 +91,25 @@ async def start_replication(master_host, master_port, server_state, replica_port
         server_state['master_repl_offset'] = master_offset
         print(f"Received FULLRESYNC: replid={master_replid}, offset={master_offset}")
 
-        # Placeholder for RDB file (not implemented)
-        # In a real system, read the RDB file here
+        # Step 5: Read empty RDB file
+        # Expect $<length>\r\n<bytes>
+        rdb_response = await reader.read(1024)
+        if not rdb_response.startswith(b"$"):
+            raise Exception("Expected RDB file with $<length>\\r\\n")
+        # Parse length
+        end_of_length = rdb_response.index(b"\r\n")
+        length = int(rdb_response[1:end_of_length].decode())
+        print(f"Expected RDB file length: {length}")
+        # Read the exact number of bytes
+        rdb_data = rdb_response[end_of_length + 2:end_of_length + 2 + length]
+        if len(rdb_data) != length:
+            # If not enough data, read more
+            while len(rdb_data) < length:
+                more_data = await reader.read(length - len(rdb_data))
+                if not more_data:
+                    raise Exception("Incomplete RDB file received")
+                rdb_data += more_data
+        print(f"Received empty RDB file ({len(rdb_data)} bytes)")
         print("Expecting RDB file (skipped for this challenge)")
 
         # Listen for commands from master
