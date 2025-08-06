@@ -188,10 +188,19 @@ def replconf_getack_func(args, client_state):
     offset = client_state['server_state'].get('master_repl_offset', 0)
     return f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(offset))}\r\n{offset}\r\n"
 def wait_func(args, client_state):
-    """Handle WAIT 0 60000 by returning 0, as no replicas are connected."""
-    if args != ['0', '60000']:
+    """Handle WAIT <num_replicas> <timeout_ms> by returning the number of connected replicas."""
+    if len(args) != 2:
         return b"-ERR invalid WAIT arguments\r\n"
-    return ":0\r\n"
+    try:
+        num_replicas = int(args[0])
+        timeout_ms = int(args[1])
+        if num_replicas < 0 or timeout_ms < 0:
+            return b"-ERR WAIT arguments must be non-negative\r\n"
+    except ValueError:
+        return b"-ERR WAIT arguments must be integers\r\n"
+    replica_count = len(client_state['server_state']['replicas'])
+    print(f"WAIT: Returning {replica_count} replicas")
+    return f":{replica_count}\r\n"
 
 COMMANDS = {
     "ping": ping_func,
