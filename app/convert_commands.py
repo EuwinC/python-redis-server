@@ -3,77 +3,77 @@ from app.commands import COMMANDS
 def parse_text_command(data):
     """Parse plain text commands separated by \n or \r\n, returning a list of (command, args)."""
     data = data.replace("\r\n", "\n")
-    
-    # Check if data contains newlines (excluding a trailing newline)
     if '\n' in data.strip():
-        # Split by newlines and filter out empty or whitespace-only lines
         lines = [line for line in data.split("\n") if line.strip()]
     else:
-        # Split by spaces for a single line
         lines = data.strip().split()
     results = []
-    condition,args = "",[]
+    condition, args = "", []
     functions = set(COMMANDS.keys())
     for line in lines:
         if line.lower() in functions:
-            if condition == "":
-                condition = line.lower()
+            if condition:
+                results.append((condition, args))
+                condition, args = line.lower(), []
             else:
-                results.append((condition,args))
-                condition,args = line.lower(),[]
+                condition = line.lower()
         else:
             args.append(line)
-    results.append((condition,args))
+    if condition:
+        results.append((condition, args))
     return results
-        
 
 def convert_resp(data):
-    """Parse a RESP array and return the command (first element) and arguments."""
-    # If data is bytes, decode it to string
-    if isinstance(data, bytes):
-        try:
-            data = data.decode('utf-8')
-        except UnicodeDecodeError:
-            return None, []
-
-    if not data.startswith("*"):
-        return parse_text_command(data)
-
-    # Split lines and filter out empty ones
-    lines = [line for line in data.split("\r\n") if line.strip()]
-    if len(lines) < 1:
-        return None, []
-
-    try:
-        num_elements = int(lines[0][1:])
-        if num_elements < 1:
-            return None, []
-
-        res = []
-        index = 1  # Start after the *N line
-        for _ in range(num_elements):
-            if index + 1 >= len(lines) or not lines[index].startswith("$"):
-                return None, []
-            content = lines[index + 1]
-            res.append(content)
-            index += 2  # Skip $length and content lines
-
-        return res[0].lower() if res else None, res[1:] if len(res) > 1 else []
+    """Parse a RESP array from bytes and return (command, args, consumed_bytes)."""
+    if not isinstance(data, bytes) or not data or data[0:1] != b"*":
+        print(f"convert_resp: Invalid input, buffer={data[:100]}")
+        return None, [], 0
     
-    except (ValueError, IndexError):
-        return None, []
+    try:
+        # Find end of array length
+        end_of_count = data.index(b"\r\n")
+        count = int(data[1:end_of_count].decode('ascii'))
+        if count < 1:
+            print(f"convert_resp: Invalid array count={count}, buffer={data[:100]}")
+            return None, [], 0
+        
+        pos = end_of_count + 2
+        args = []
+        for _ in range(count):
+            if pos >= len(data) or data[pos:pos+1] != b"$":
+                print(f"convert_resp: Missing bulk string marker at pos={pos}, buffer={data[:100]}")
+                return None, [], 0
+            end_of_length = data.index(b"\r\n", pos)
+            length = int(data[pos+1:end_of_length].decode('ascii'))
+            pos = end_of_length + 2
+            if pos + length > len(data):
+                print(f"convert_resp: Incomplete bulk string, pos={pos}, length={length}, buffer={data[:100]}")
+                return None, [], 0
+            arg = data[pos:pos+length].decode('utf-8', errors='replace')
+            args.append(arg)
+            pos += length + 2  # Skip \r\n
+        
+        cmd = args[0].lower() if args else None
+        print(f"convert_resp: Success, cmd={cmd}, args={args}, consumed={pos}")
+        return cmd, args[1:], pos
+    except (ValueError, IndexError, UnicodeDecodeError) as e:
+        print(f"convert_resp error: {str(e)}, buffer={data[:100]}")
+        return None, [], 0
+
+def build_resp_array(cmd: str, args: list):
+    """Build a RESP array from command and arguments."""
+    parts = [f"${len(cmd)}\r\n{cmd}"]
+    for arg in args:
+        parts.append(f"${len(arg)}\r\n{arg}")
+    return f"*{len(args) + 1}\r\n{''.join(parts)}\r\n"
 
 def main():
-    data1 = "SeT\nfoo\nbar"
-    data2 = "redis-cli RPUSH list_key element"
-    data3= "SET mango strawberry"
-    
-    convert = convert_resp(data1)
-    convert = convert_resp(data3)
-    commands = [item[0] for item in convert]
-    args = [item[1] for item in convert] 
-    print(commands,args)
-    print(convert_resp(data2))
+    data1 = b"*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n"
+    data2 = b"*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n"
+    print(convert_resp(data1))  # Should print: ('set', ['foo', '123'], 26)
+    print(convert_resp(data2))  # Should print: ('get', ['foo'], 18)
+    print(convert_resp(b"invalid"))  # Should print: (None, [], 0)
+    print(convert_resp(b"\r\n$3\r\nfoo\r\n$3\r\n123\r\n"))  # Should print: (None, [], 0)
 
 if __name__ == "__main__":
     main()

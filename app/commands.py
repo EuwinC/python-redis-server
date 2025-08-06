@@ -4,7 +4,7 @@ from app.data_type.redisStream import check_if_stream, xadd, xrange, xread
 import app.data_type.redisKey as rkey
 from typing import List
 import asyncio
-
+write_commands = {'set', 'incr', 'rpush', 'lpush', 'lpop', 'xadd'}
 # Key Functions
 def ping_func(args, _):
     return "+PONG\r\n"
@@ -203,7 +203,7 @@ COMMANDS = {
 async def redis_command(cmd: str, args: List[str], client_state, is_replica=False) -> str:
     key = cmd.lower()
     server_state = client_state.get('server_state', {'role': 'master'})
-    
+
     # Helper to build RESP array for propagation
     def build_resp_array(cmd, args):
         parts = [f"${len(cmd)}\r\n{cmd}\r\n"]
@@ -282,6 +282,15 @@ async def redis_command(cmd: str, args: List[str], client_state, is_replica=Fals
                         result = f"-ERR {c} failed: {str(e)}\r\n"
                 replies.append(result)
                 print(f"EXEC: {c} {a} -> {result!r}")
+                # Propagate executed write commands
+                if server_state['role'] == 'master' and c.lower() in write_commands:
+                    cmd_data = build_resp_array(c, a)
+                    for replica_writer in server_state['replicas']:
+                        try:
+                            replica_writer.write(cmd_data)
+                            await replica_writer.drain()
+                        except Exception as e:
+                            print(f"Failed to propagate {c} to replica: {e}")
             client_state['exec_event'].clear()
             out = f"*{len(replies)}\r\n"
             for r in replies:
@@ -291,14 +300,13 @@ async def redis_command(cmd: str, args: List[str], client_state, is_replica=Fals
             client_state['multi_event'].set()
             client_state['exec_event'].clear()
             return f"-ERR exec failed: {str(e)}\r\n"
-        
+
     # Queue non-transaction commands during MULTI
     if not client_state['multi_event'].is_set() and key != "exec":
         client_state['exec_event'].append([cmd, args])
         return "+QUEUED\r\n"
-    
-    # Write commands to propagate
-    write_commands = {'set', 'incr', 'rpush', 'lpush', 'lpop', 'xadd'}
+
+        # Write commands to propagate
     if key in write_commands:
         fn = COMMANDS.get(key)
         if not fn:
@@ -309,7 +317,7 @@ async def redis_command(cmd: str, args: List[str], client_state, is_replica=Fals
             for replica_writer in server_state['replicas']:
                 try:
                     replica_writer.write(cmd_data)
-                    await replica_writer.drain()  # Ensure immediate write
+                    await replica_writer.drain()
                 except Exception as e:
                     print(f"Failed to propagate {cmd} to replica: {e}")
         return resp if not is_replica else None
