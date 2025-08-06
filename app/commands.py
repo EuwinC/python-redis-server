@@ -187,6 +187,11 @@ def replconf_getack_func(args, client_state):
         return b"-ERR invalid REPLCONF GETACK arguments\r\n"
     offset = client_state['server_state'].get('master_repl_offset', 0)
     return f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(offset))}\r\n{offset}\r\n"
+def wait_func(args, client_state):
+    """Handle WAIT 0 60000 by returning 0, as no replicas are connected."""
+    if args != ['0', '60000']:
+        return b"-ERR invalid WAIT arguments\r\n"
+    return ":0\r\n"
 
 COMMANDS = {
     "ping": ping_func,
@@ -218,7 +223,8 @@ async def redis_command(cmd: str, args: List[str], client_state, is_replica=Fals
         for arg in args:
             parts.append(f"${len(arg)}\r\n{arg}\r\n")
         return f"*{len(args) + 1}\r\n{''.join(parts)}".encode()
-
+    if key == "wait":
+        return wait_func(args, client_state)
     # Handle replication commands
     if cmd.lower() == 'info' and args and args[0].lower() == 'replication':
         role = server_state['role']
