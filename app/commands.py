@@ -309,9 +309,10 @@ async def redis_command(cmd: str, args: List[str], client_state, is_replica=Fals
                 # Propagate executed write commands
                 if server_state['role'] == 'master' and c.lower() in write_commands:
                     cmd_data = build_resp_array(c, a)
-                    for replica_writer in server_state['replicas']:
+                    server_state['master_repl_offset'] += len(cmd_data.encode())
+                    for replica_writer, _ in server_state['replicas']:
                         try:
-                            replica_writer.write(cmd_data)
+                            replica_writer.write(cmd_data.encode())
                             await replica_writer.drain()
                         except Exception as e:
                             print(f"Failed to propagate {c} to replica: {e}")
@@ -338,9 +339,10 @@ async def redis_command(cmd: str, args: List[str], client_state, is_replica=Fals
         resp = await fn(args, client_state) if key in ('xread', 'blpop') else fn(args, client_state)
         if server_state['role'] == 'master' and not is_replica and client_state['multi_event'].is_set():
             cmd_data = build_resp_array(cmd, args)
-            for replica_writer in server_state['replicas']:
+            server_state['master_repl_offset'] += len(cmd_data.encode())
+            for replica_writer, _ in server_state['replicas']:
                 try:
-                    replica_writer.write(cmd_data)
+                    replica_writer.write(cmd_data.encode())
                     await replica_writer.drain()
                 except Exception as e:
                     print(f"Failed to propagate {cmd} to replica: {e}")
