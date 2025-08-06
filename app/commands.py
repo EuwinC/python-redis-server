@@ -186,7 +186,7 @@ def replconf_getack_func(args, client_state):
     if args[0].lower() != 'getack' or args[1] != '*':
         return b"-ERR invalid REPLCONF GETACK arguments\r\n"
     offset = client_state['server_state'].get('master_repl_offset', 0)
-    return f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${1}\r\n{0}\r\n"
+    return f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${len(str(offset))}\r\n{offset}\r\n"
 
 COMMANDS = {
     "ping": ping_func,
