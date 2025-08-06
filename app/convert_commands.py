@@ -54,7 +54,7 @@ def convert_resp(data):
             pos += length + 2  # Skip \r\n
         
         cmd = args[0].lower() if args else None
-        print(f"convert_resp: Success, cmd={cmd}, args={args}, consumed={pos}")
+        print(f"convert_resp: Success, cmd={cmd}, args={args[1:]}, consumed={pos}")
         return cmd, args[1:], pos
     except (ValueError, IndexError, UnicodeDecodeError) as e:
         print(f"convert_resp error: {str(e)}, buffer={data[:100]}")

@@ -181,6 +181,13 @@ async def multi_func(args, client_state):
     except Exception as e:
         return f"-ERR multi failed: {str(e)}\r\n"
 
+def replconf_getack_func(args, client_state):
+    """Handle REPLCONF GETACK * by returning the current replication offset."""
+    if args[0].lower() != 'getack' or args[1] != '*':
+        return b"-ERR invalid REPLCONF GETACK arguments\r\n"
+    offset = client_state['server_state'].get('master_repl_offset', 0)
+    return f"*3\r\n$8\r\nREPLCONF\r\n$3\r\nACK\r\n${1}\r\n{0}\r\n"
+
 COMMANDS = {
     "ping": ping_func,
     "echo": echo_func,
@@ -198,6 +205,7 @@ COMMANDS = {
     "xread": xread_func,
     "incr": incr_func,
     "multi": multi_func,
+    'replconf': lambda args, client_state: b"+OK\r\n" if args[0].lower() in ['listening-port', 'capa'] else replconf_getack_func(args, client_state),
 }
 
 async def redis_command(cmd: str, args: List[str], client_state, is_replica=False) -> str:
@@ -226,9 +234,10 @@ async def redis_command(cmd: str, args: List[str], client_state, is_replica=Fals
         response_bytes = response.encode()
         return f"${len(response_bytes)}\r\n{response}\r\n".encode()
     
-    if cmd.lower() == 'replconf' and args:
-        if args[0].lower() in ['listening-port', 'capa']:
-            return b"+OK\r\n"
+    if key == "replconf" and args:
+        if args[0].lower() in ['listening-port', 'capa', 'getack']:
+            return COMMANDS['replconf'](args, client_state)
+    
     
     if cmd.lower() == 'psync' and len(args) == 2:
         if server_state['role'] == 'master':

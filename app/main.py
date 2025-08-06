@@ -143,6 +143,7 @@ async def start_replication(master_host, master_port, server_state, replica_port
                     print(f"RDB buffer updated: len={len(buffer)}, content={buffer[:100]}")
                 rdb_data = buffer[rdb_data_start:rdb_data_start + length]
                 print(f"Received RDB file: len={len(rdb_data)}, content={rdb_data}")
+                server_state['master_repl_offset'] += rdb_data_start + length  # Update offset
                 buffer = buffer[rdb_data_start + length:]  # Clear RDB data
                 print(f"Buffer after RDB: len={len(buffer)}, content={buffer[:100]}")
                 break
@@ -170,7 +171,11 @@ async def start_replication(master_host, master_port, server_state, replica_port
                         print(f"Processing propagated command: {cmd} {args}")
                         result = redis_command(cmd, args, client_state, is_replica=True)
                         if inspect.iscoroutine(result):
-                            await result
+                            result = await result
+                        if result and cmd.lower() == 'replconf' and args and args[0].lower() == 'getack':
+                            writer.write(result.encode() if isinstance(result, str) else result)
+                            await writer.drain()
+                        server_state['master_repl_offset'] += consumed  # Update offset
                         buffer = buffer[consumed:]  # Clear processed bytes
                         print(f"Buffer after command: len={len(buffer)}, content={buffer[:100]}")
                     except Exception as e:
