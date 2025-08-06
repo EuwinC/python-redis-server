@@ -9,9 +9,12 @@ async def handle_client(reader, writer, server_state):
     client_state = {
         'multi_event': asyncio.Event(),
         'exec_event': [],
-        'server_state': server_state
+        'server_state': server_state,
+        'is_replica': False,  # Track if client is a replica
+        'handshake_step': 0  # 0: none, 1: PING, 2: REPLCONF port, 3: REPLCONF capa, 4: PSYNC
     }
     client_state['multi_event'].set()
+    
     try:
         while True:
             data = await reader.read(1024)
@@ -22,22 +25,42 @@ async def handle_client(reader, writer, server_state):
                 resp = "-ERR invalid RESP format\r\n"
             else:
                 try:
-                    if server_state['role'] == 'slave' and cmd.lower() in ['set', 'del', 'incr', 'decr']:
+                    # Block write commands on slave
+                    if server_state['role'] == 'slave' and cmd.lower() in ['set', 'incr', 'rpush', 'lpush', 'lpop', 'xadd']:
                         resp = "-ERR write commands not allowed on slave\r\n"
                     else:
+                        # Track handshake for replica detection
+                        if server_state['role'] == 'master':
+                            if cmd.lower() == 'ping' and client_state['handshake_step'] == 0:
+                                client_state['handshake_step'] = 1
+                            elif cmd.lower() == 'replconf' and args[0].lower() == 'listening-port' and client_state['handshake_step'] == 1:
+                                client_state['handshake_step'] = 2
+                            elif cmd.lower() == 'replconf' and args[0].lower() == 'capa' and client_state['handshake_step'] == 2:
+                                client_state['handshake_step'] = 3
+                            elif cmd.lower() == 'psync' and client_state['handshake_step'] == 3:
+                                client_state['is_replica'] = True
+                                server_state['replicas'].append(writer)
+                                print(f"Added replica connection: {len(server_state['replicas'])} replicas connected")
+                        
                         result = redis_command(cmd, args, client_state)
                         if inspect.iscoroutine(result):
                             result = await result
                         resp = result
                 except Exception as e:
                     resp = f"-ERR server error: {str(e)}\r\n"
-            writer.write(resp.encode() if isinstance(resp, str) else resp)
-            await writer.drain()
+            
+            # Send response unless client is a confirmed replica processing non-handshake commands
+            if not (client_state['is_replica'] and cmd.lower() not in ['ping', 'replconf', 'psync']):
+                writer.write(resp.encode() if isinstance(resp, str) else resp)
+                await writer.drain()
     except Exception as e:
         print(f"Client error: {e}")
         writer.write(f"-ERR client error: {str(e)}\r\n".encode())
         await writer.drain()
     finally:
+        if client_state['is_replica'] and writer in server_state['replicas']:
+            server_state['replicas'].remove(writer)
+            print(f"Removed replica connection: {len(server_state['replicas'])} replicas remaining")
         writer.close()
         await writer.wait_closed()
 
@@ -80,7 +103,7 @@ async def start_replication(master_host, master_port, server_state, replica_port
         if not response.startswith(b"+FULLRESYNC"):
             raise Exception("PSYNC failed: expected +FULLRESYNC")
         
-        # Parse FULLRESYNC response (e.g., +FULLRESYNC <replid> <offset>)
+        # Parse FULLRESYNC response
         response_str = response.decode()
         parts = response_str.split()
         if len(parts) < 3 or parts[0] != "+FULLRESYNC":
@@ -92,27 +115,22 @@ async def start_replication(master_host, master_port, server_state, replica_port
         print(f"Received FULLRESYNC: replid={master_replid}, offset={master_offset}")
 
         # Step 5: Read empty RDB file
-        # Expect $<length>\r\n<bytes>
         rdb_response = await reader.read(1024)
         if not rdb_response.startswith(b"$"):
             raise Exception("Expected RDB file with $<length>\\r\\n")
-        # Parse length
         end_of_length = rdb_response.index(b"\r\n")
         length = int(rdb_response[1:end_of_length].decode())
         print(f"Expected RDB file length: {length}")
-        # Read the exact number of bytes
         rdb_data = rdb_response[end_of_length + 2:end_of_length + 2 + length]
         if len(rdb_data) != length:
-            # If not enough data, read more
             while len(rdb_data) < length:
                 more_data = await reader.read(length - len(rdb_data))
                 if not more_data:
                     raise Exception("Incomplete RDB file received")
                 rdb_data += more_data
         print(f"Received empty RDB file ({len(rdb_data)} bytes)")
-        print("Expecting RDB file (skipped for this challenge)")
 
-        # Listen for commands from master
+        # Step 6: Process propagated commands silently
         while True:
             data = await reader.read(1024)
             if not data:
@@ -120,11 +138,11 @@ async def start_replication(master_host, master_port, server_state, replica_port
             cmd, args = convert_resp(data)
             if cmd:
                 try:
-                    result = redis_command(cmd, args, {'server_state': server_state})
+                    result = redis_command(cmd, args, {'server_state': server_state}, is_replica=True)
                     if inspect.iscoroutine(result):
                         await result
                 except Exception as e:
-                    print(f"Replication error: {e}")
+                    print(f"Replication command error: {e}")
     except Exception as e:
         print(f"Replication error: {e}")
     finally:
@@ -159,7 +177,8 @@ async def main():
         'master_host': master_host,
         'master_port': master_port,
         'master_replid': '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb',
-        'master_repl_offset': 0
+        'master_repl_offset': 0,
+        'replicas': []  # Track confirmed replica connections
     }
     
     print(f"Starting server on port {port}")

@@ -3,12 +3,13 @@ from app.data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, 
 from app.data_type.redisStream import check_if_stream, xadd, xrange, xread
 import app.data_type.redisKey as rkey
 from typing import List
+import asyncio
 
 # Key Functions
-def ping_func(args,_):
+def ping_func(args, _):
     return "+PONG\r\n"
 
-def echo_func(args,_):
+def echo_func(args, _):
     return f"${len(args[0])}\r\n{args[0]}\r\n"
 
 def set_func(args, client_state):
@@ -30,7 +31,7 @@ def get_func(args, client_state):
     except Exception as e:
         return f"-ERR get failed: {str(e)}\r\n"
 
-def type_func(args,_):
+def type_func(args, _):
     try:
         key = args[0]
         t = rkey.check_type(key)
@@ -71,13 +72,13 @@ def lpush_func(args, client_state):
     except Exception as e:
         return f"-ERR lpush failed: {str(e)}\r\n"
 
-def llen_func(args,_):
+def llen_func(args, _):
     try:
         return f":{llen(args[0])}\r\n"
     except Exception as e:
         return f"-ERR llen failed: {str(e)}\r\n"
 
-def lrange_func(args,_):
+def lrange_func(args, _):
     try:
         arr = lrange(args[0], int(args[1]), int(args[2]))
         res = f"*{len(arr)}\r\n"
@@ -133,7 +134,6 @@ def xadd_func(args, client_state):
         return f"-ERR xadd failed: {str(e)}\r\n"
 
 def xrange_func(args, _):
-    print("hi",args)
     try:
         key, start, end = args
         arr = xrange(key, start, end)
@@ -200,9 +200,18 @@ COMMANDS = {
     "multi": multi_func,
 }
 
-async def redis_command(cmd: str, args: List[str], client_state) -> str:
+async def redis_command(cmd: str, args: List[str], client_state, is_replica=False) -> str:
     key = cmd.lower()
     server_state = client_state.get('server_state', {'role': 'master'})
+    
+    # Helper to build RESP array for propagation
+    def build_resp_array(cmd, args):
+        parts = [f"${len(cmd)}\r\n{cmd}\r\n"]
+        for arg in args:
+            parts.append(f"${len(arg)}\r\n{arg}\r\n")
+        return f"*{len(args) + 1}\r\n{''.join(parts)}".encode()
+
+    # Handle replication commands
     if cmd.lower() == 'info' and args and args[0].lower() == 'replication':
         role = server_state['role']
         response = f"role:{role}\r\n"
@@ -210,41 +219,43 @@ async def redis_command(cmd: str, args: List[str], client_state) -> str:
             master_host = server_state['master_host']
             master_port = server_state['master_port']
             response += f"master_host:{master_host}\r\nmaster_port:{master_port}\r\n"
-        # Add replication details for master (per test expectation)
         else:
             master_replid = server_state.get('master_replid', '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb')
             master_repl_offset = server_state.get('master_repl_offset', 0)
             response += f"master_repl_offset:{master_repl_offset}\r\nmaster_replid:{master_replid}\r\n"
-        
-        # Format as RESP bulk string with correct length
         response_bytes = response.encode()
         return f"${len(response_bytes)}\r\n{response}\r\n".encode()
+    
     if cmd.lower() == 'replconf' and args:
         if args[0].lower() in ['listening-port', 'capa']:
             return b"+OK\r\n"
+    
     if cmd.lower() == 'psync' and len(args) == 2:
         if server_state['role'] == 'master':
             replid = server_state.get('master_replid', '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb')
             offset = server_state.get('master_repl_offset', 0)
             empty_rdb = bytes.fromhex(
-                '524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2'
+                '524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040'
+                'fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2'
             )
             response = f"+FULLRESYNC {replid} {offset}\r\n${len(empty_rdb)}\r\n".encode() + empty_rdb
             return response
         else:
             return b"-ERR PSYNC only allowed on master\r\n"
-    
-    print(f"Command: {key}, Args: {args}, Exec Queue: {client_state['exec_event']}, Multi: {client_state['multi_event'].is_set()}")
+
+    # Transaction commands
     if key == "multi":
         return await multi_func(args, client_state)
+    
     if key == "discard":
         if client_state['multi_event'].is_set():
             return "-ERR DISCARD without MULTI\r\n"
         else:
-            client_state['multi_event'].set() 
+            client_state['multi_event'].set()
             client_state['exec_event'].clear()
-            rkey.rkey.discard_transaction()    
-        return "+OK\r\n"
+            rkey.rkey.discard_transaction()
+            return "+OK\r\n"
+    
     if key == "exec":
         if client_state['multi_event'].is_set():
             return "-ERR EXEC without MULTI\r\n"
@@ -253,14 +264,13 @@ async def redis_command(cmd: str, args: List[str], client_state) -> str:
             return "*0\r\n"
         replies = []
         try:
-            # Apply transaction updates to rkey._data
             rkey.rkey.apply_transaction()
-            client_state['multi_event'].set()  # Move set after apply_transaction
+            client_state['multi_event'].set()
             for c, a in client_state['exec_event']:
                 fn = COMMANDS.get(c.lower())
                 if not fn:
                     result = "-ERR unknown command or invalid arguments\r\n"
-                elif c.lower() in ("xread", "blpop", "multi"):
+                elif c.lower() in ("xread", "blpop"):
                     try:
                         result = await fn(a, client_state)
                     except Exception as e:
@@ -281,13 +291,33 @@ async def redis_command(cmd: str, args: List[str], client_state) -> str:
             client_state['multi_event'].set()
             client_state['exec_event'].clear()
             return f"-ERR exec failed: {str(e)}\r\n"
+        
+    # Queue non-transaction commands during MULTI
     if not client_state['multi_event'].is_set() and key != "exec":
         client_state['exec_event'].append([cmd, args])
         return "+QUEUED\r\n"
+    
+    # Write commands to propagate
+    write_commands = {'set', 'incr', 'rpush', 'lpush', 'lpop', 'xadd'}
+    if key in write_commands:
+        fn = COMMANDS.get(key)
+        if not fn:
+            return "-ERR unknown command or invalid arguments\r\n"
+        resp = await fn(args, client_state) if key in ('xread', 'blpop') else fn(args, client_state)
+        if server_state['role'] == 'master' and not is_replica and client_state['multi_event'].is_set():
+            cmd_data = build_resp_array(cmd, args)
+            for replica_writer in server_state['replicas']:
+                try:
+                    replica_writer.write(cmd_data)
+                    await replica_writer.drain()  # Ensure immediate write
+                except Exception as e:
+                    print(f"Failed to propagate {cmd} to replica: {e}")
+        return resp if not is_replica else None
 
+    # Non-write commands
     fn = COMMANDS.get(key)
     if not fn:
         return "-ERR unknown command or invalid arguments\r\n"
-    if key in ("xread", "blpop", "multi"):
+    if key in ("xread", "blpop"):
         return await fn(args, client_state)
     return fn(args, client_state)
