@@ -24,6 +24,7 @@ class RedisKey:
                 del self._data[key]
 
     def add_data(self, key: str, val, ttl: Optional[float], kind: str = None, client_state=None) -> None:
+        print(f"inadd_data {key},{val}")
         try:
             expire = time.time() + ttl if ttl is not None else None
             # Determine kind if not provided
@@ -91,6 +92,7 @@ class RedisKey:
         return ent.value
 
     def rset(self, args: List[str], client_state=None) -> None:
+        print(f"inrset,{args}")
         try:
             key, val = args[0], args[1]
             ttl = float(args[3]) / 1000 if len(args) == 4 else None

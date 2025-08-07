@@ -1,4 +1,3 @@
-from app.commands import COMMANDS
 
 def parse_text_command(data):
     """Parse plain text commands separated by \n or \r\n, returning a list of (command, args)."""
@@ -9,7 +8,7 @@ def parse_text_command(data):
         lines = data.strip().split()
     results = []
     condition, args = "", []
-    functions = set(COMMANDS.keys())
+    functions = set()
     for line in lines:
         if line.lower() in functions:
             if condition:
@@ -62,11 +61,10 @@ def convert_resp(data):
 
 def build_resp_array(cmd: str, args: list):
     """Build a RESP array from command and arguments."""
-    parts = [f"${len(cmd)}\r\n{cmd}"]
+    parts = [f"${len(cmd)}\r\n{cmd}\r\n"]
     for arg in args:
-        parts.append(f"${len(arg)}\r\n{arg}")
-    return f"*{len(args) + 1}\r\n{''.join(parts)}\r\n"
-
+        parts.append(f"${len(arg)}\r\n{arg}\r\n")
+    return f"*{len(args) + 1}\r\n{''.join(parts)}"
 def main():
     data1 = b"*3\r\n$3\r\nSET\r\n$3\r\nfoo\r\n$3\r\n123\r\n"
     data2 = b"*2\r\n$3\r\nGET\r\n$3\r\nfoo\r\n"
