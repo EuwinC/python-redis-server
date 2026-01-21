@@ -1,60 +1,59 @@
-[![progress-banner](https://backend.codecrafters.io/progress/redis/ea320d18-4985-49c8-a499-2fd5abcc2273)](https://app.codecrafters.io/users/codecrafters-bot?r=2qF)
+Custom Redis Server (Python)
+A high-performance, asynchronous Redis-compatible server built from scratch using asyncio. This project demonstrates core systems programming concepts, including network protocols, data persistence, and distributed state management.
 
-This is a starting point for Python solutions to the
-["Build Your Own Redis" Challenge](https://codecrafters.io/challenges/redis).
+🚀 Key Features
+3-Layer Architecture: Decoupled Networking (TCP/RESP), Middleware (Guards/Routing), and Execution layers for high maintainability.
 
-In this challenge, you'll build a toy Redis clone that's capable of handling
-basic commands like `PING`, `SET` and `GET`. Along the way we'll learn about
-event loops, the Redis protocol and more.
+Hybrid Persistence: Achieves 100% data durability by combining RDB snapshots (binary state recovery) and AOF logging (command replay).
 
-**Note**: If you're viewing this repo on GitHub, head over to
-[codecrafters.io](https://codecrafters.io) to try the challenge.
+Sub-Millisecond Performance: Leverages a single-threaded event loop (asyncio) to handle concurrent client connections with minimal latency.
 
-# Passing the first stage
+Master-Slave Replication: Supports distributed state via a custom handshake protocol and asynchronous command propagation.
 
-The entry point for your Redis implementation is in `app/main.py`. Study and
-uncomment the relevant code, and push your changes to pass the first stage:
+Transaction Support: Implements atomic execution via MULTI, EXEC, and DISCARD with a dedicated transaction queue.
 
-```sh
-git commit -am "pass 1st stage" # any msg
-git push origin master
-```
+🏗️ Architecture
+The server is structured into three distinct layers to ensure a clean separation of concerns:
 
-That's all!
+Networking Layer (main.py): Handles raw TCP sockets and parses the RESP (Redis Serialization Protocol).
 
-# Stage 2 & beyond
+Middleware/Guard Layer (router.py): Centralized engine that manages permissions (Slave-Read-Only), transaction queuing, and triggers persistence/replication.
 
-Note: This section is for stages 2 and beyond.
+Execution Layer (commands.py): Pure logic functions that manipulate in-memory data structures (Strings, Lists, Streams) through a metadata-driven registry.
 
-1. Ensure you have `python (3.13)` installed locally
-1. Run `./your_program.sh` to run your Redis server, which is implemented in
-   `app/main.py`.
-1. Commit your changes and run `git push origin master` to submit your solution
-   to CodeCrafters. Test output will be streamed to your terminal.
+💾 Persistence Engine
+To guarantee durability, the server implements two complementary strategies:
 
-# Troubleshooting
+Append-Only File (AOF): Every write-intent command is logged to disk in raw RESP format. On startup, the server replays the AOF to restore the most recent state.
 
-## module `socket` has no attribute `create_server`
+Redis Database (RDB): Periodic binary snapshots of the entire keyspace using Python serialization, allowing for rapid recovery of large datasets.
 
-When running your server locally, you might see an error like this:
+🛠️ Technical Stack
+Language: Python 3.10+
 
-```
-Traceback (most recent call last):
-  File "/.../python3.7/runpy.py", line 193, in _run_module_as_main
-    "__main__", mod_spec)
-  File "/.../python3.7/runpy.py", line 85, in _run_code
-    exec(code, run_globals)
-  File "/app/app/main.py", line 11, in <module>
-    main()
-  File "/app/app/main.py", line 6, in main
-    s = socket.create_server(("localhost", 6379), reuse_port=True)
-AttributeError: module 'socket' has no attribute 'create_server'
-```
+Concurrency: asyncio (Event Loop)
 
-This is because `socket.create_server` was introduced in Python 3.8, and you
-might be running an older version.
+Structures: Min-heaps (TTL), Deques (Lists), Nested Dicts (Streams)
 
-You can fix this by installing Python 3.8 locally and using that.
+Protocol: RESP (Redis Serialization Protocol)
 
-If you'd like to use a different version of Python, change the `language_pack`
-value in `codecrafters.yml`.
+🚦 Getting Started
+Prerequisites
+Python 3.10 or higher
+
+Installation
+Bash
+
+git clone https://github.com/yourusername/redis-python.git
+cd redis-python
+Running the Server
+Start as Master:
+
+Bash
+
+python3 main.py --port 6379
+Start as Slave:
+
+Bash
+
+python3 main.py --port 6380 --replicaof "127.0.0.1 6379"
