@@ -2,9 +2,9 @@ empty_rdb = bytes.fromhex(
     '524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040'
     'fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2'
 )
-from app.registry import COMMAND_REGISTRY,WRITE_COMMANDS
-from app.persistence import log_to_aof
-from app.convert_commands import build_resp_array
+from registry import COMMAND_REGISTRY,WRITE_COMMANDS
+from persistence import log_to_aof
+from convert_commands import build_resp_array
 import inspect
 
 def check_permissions(server_role, cmd_key):

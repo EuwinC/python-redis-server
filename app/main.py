@@ -1,57 +1,48 @@
-import socket
-import asyncio
 import argparse
 import inspect
-from app.convert_commands import convert_resp,build_resp_array
-from app.commands import redis_command,write_commands
-from app.persistence import load_rdb, load_from_aof, save_rdb
-from app.data_type.redisKey import rkey
-from router import check_permissions, handle_replication_handshake,execute_command,handle_persistence_and_replication
-
+from commands import redis_command,write_commands
+from persistence import load_rdb, load_from_aof, save_rdb
+from data_type.redisKey import rkey
+import asyncio
+from convert_commands import convert_resp
+from router import execute_command, handle_replication_handshake
 
 async def handle_client(reader, writer, server_state):
+    # Initialize client context
     client_state = {
-        'multi_event': asyncio.Event(),
-        'exec_event': [],
         'server_state': server_state,
-        'is_replica': False,
-        'handshake_step': 0,
-        'writer': writer
+        'multi_event': asyncio.Event(), # For transactions
+        'exec_event': [],               # For transactions
+        'is_replica': False,            # Default role
+        'handshake_step': 0             # For replica handshake
     }
-    client_state['multi_event'].set()
+    client_state['multi_event'].set() 
+
     while True:
         data = await reader.read(1024)
         if not data: break
+
+        # 1. Parse Input
+        cmd_key, args, _ = convert_resp(data)
+        if not cmd_key: continue
+
+        # 2. Check for Replication Handshake (Special logic before standard routing)
+        # This handles PING, REPLCONF, PSYNC sequences for replicas
+        response, stop_processing = await handle_replication_handshake(
+            cmd_key, args, client_state, server_state
+        )
         
-        cmd, args, consumed = convert_resp(data)
-        cmd_key = cmd.lower()
-
-        # --- LAYER 2: THE GUARDS ---
-        # 1. Permission Guard
-        error = check_permissions(server_state['role'], cmd_key)
-        if error:
-            writer.write(error.encode())
-            continue
-
-        # 2. Handshake/System Guard
-        # If this handles the response, it returns (resp, False)
-        sys_resp, proceed = await handle_replication_handshake(cmd, args, client_state, server_state)
-        if sys_resp:
-            writer.write(sys_resp if isinstance(sys_resp, bytes) else sys_resp.encode())
-            if not proceed: continue
-
-        # --- LAYER 3: EXECUTION (Unified Async Handling) ---
-        # We always 'await' the executor; it handles the internal sync/async logic
-        response = await execute_command(cmd_key, args, client_state)
-        
-        # --- POST-EXECUTION (AOF & REPLICATION) ---
-        if cmd_key in write_commands and not client_state['is_replica']:
-            await handle_persistence_and_replication(cmd, args, client_state)
-
+        # Send handshake response if one exists
         if response:
-            writer.write(response.encode() if isinstance(response, str) else response)
+            writer.write(response if isinstance(response, bytes) else response.encode())
             await writer.drain()
-            
+
+        # 3. If it wasn't a handshake command (or handshake continues), execute standard command
+        if not stop_processing:
+            response = await execute_command(cmd_key, args, client_state)
+            if response:
+                writer.write(response.encode())
+                await writer.drain()
         
         
 async def start_replication(master_host, master_port, server_state, local_port):

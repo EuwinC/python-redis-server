@@ -1,7 +1,6 @@
 import pickle
 import os
-from app.convert_commands import convert_resp
-from app.commands import redis_command
+from convert_commands import convert_resp
 
 AOF_FILE = "appendonly.aof"
 RDB_FILE = "dump.rdb"
@@ -44,7 +43,7 @@ async def load_from_aof(client_state):
     while pos < len(buffer):
         # 1. Parse the next common from the buffer
         cmd, args, consumed = convert_resp(buffer[pos:])
-        
+        from commands import redis_command
         if cmd:
             # 2. Execute the common internally
             # set is_replic= True to avoid re-logging to AOF or propagating to replicas during recovery

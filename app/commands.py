@@ -1,12 +1,12 @@
 from datetime import datetime
-from app.data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, lpop_n, blpop
-from app.data_type.redisStream import check_if_stream, xadd, xrange, xread
-import app.data_type.redisKey as rkey
+from data_type.redisList import check_if_lists, rpush, lpush, llen, lrange, lpop_n, blpop
+from data_type.redisStream import check_if_stream, xadd, xrange, xread
+import data_type.redisKey as rkey
 from typing import List
 import asyncio
-from app.convert_commands import build_resp_array
-from app.persistence import log_to_aof
-from app.registry  import redis_cmd
+from convert_commands import build_resp_array
+from persistence import log_to_aof
+from registry  import redis_cmd
 
 write_commands = {'set', 'incr', 'rpush', 'lpush', 'lpop', 'xadd'}
 
