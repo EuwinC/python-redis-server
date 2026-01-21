@@ -4,6 +4,10 @@ import argparse
 import inspect
 from app.convert_commands import convert_resp,build_resp_array
 from app.commands import redis_command,write_commands
+from app.persistence import load_rdb, load_from_aof, save_rdb
+from app.data_type.redisKey import rkey
+from router import check_permissions, handle_replication_handshake,execute_command,handle_persistence_and_replication
+
 
 async def handle_client(reader, writer, server_state):
     client_state = {
@@ -15,80 +19,41 @@ async def handle_client(reader, writer, server_state):
         'writer': writer
     }
     client_state['multi_event'].set()
-    
-    try:
-        while True:
-            data = await reader.read(1024)
-            if not data:
-                break
-            cmd, args, consumed = convert_resp(data)
-            if not cmd:
-                resp = "-ERR invalid RESP format\r\n"
-            else:
-                if server_state['role'] == 'slave' and cmd.lower() in ['set', 'incr', 'rpush', 'lpush', 'lpop', 'xadd']:
-                    resp = "-ERR write commands not allowed on slave\r\n"
-                elif server_state['role'] == 'master':
-                    if cmd.lower() == 'ping' and client_state['handshake_step'] == 0:
-                        client_state['handshake_step'] = 1
-                        resp = "+PONG\r\n"
-                    elif cmd.lower() == 'replconf' and args and args[0].lower() == 'listening-port' and client_state['handshake_step'] == 1:
-                        client_state['handshake_step'] = 2
-                        resp = "+OK\r\n"
-                    elif cmd.lower() == 'replconf' and args and args[0].lower() == 'capa' and client_state['handshake_step'] == 2:
-                        client_state['handshake_step'] = 3
-                        resp = "+OK\r\n"
-                    elif cmd.lower() == 'psync' and args and len(args) == 2 and client_state['handshake_step'] == 3:
-                        replid = server_state.get('master_replid', '8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb')
-                        offset = server_state.get('master_repl_offset', 0)
-                        empty_rdb = bytes.fromhex(
-                            '524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040'
-                            'fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2'
-                        )
-                        writer.write(f"+FULLRESYNC {replid} {offset}\r\n${len(empty_rdb)}\r\n".encode() + empty_rdb)
-                        await writer.drain()
-                        server_state['replicas'].append((writer, 0))
-                        print(f"Added replica connection: {len(server_state['replicas'])} replicas connected")
-                        resp = None
-                    elif cmd.lower() == 'replconf' and args and args[0].lower() == 'ack' and not client_state['is_replica']:
-                        offset = int(args[1])
-                        for i, (w, _) in enumerate(server_state['replicas']):
-                            if w == writer:
-                                server_state['replicas'][i] = (w, offset)
-                                print(f"Updated replica offset to {offset}")
-                        resp = None
-                    else:
-                        # Check if command is async
-                        result = redis_command(cmd, args, client_state, client_state['is_replica'])
-                        if inspect.iscoroutine(result):
-                            resp = await result
-                        else:
-                            resp = result
-                        print(f"handle_client: cmd={cmd}, resp={resp!r}, type={type(resp)}")
-                elif client_state['is_replica'] and cmd.lower() == 'replconf' and args and args[0].lower() == 'getack':
-                    offset = server_state.get('processed_offset', 0)
-                    ack_cmd = build_resp_array("REPLCONF", ["ACK", str(offset)])
-                    writer.write(ack_cmd.encode())
-                    await writer.drain()
-                    resp = None
-                else:
-                    # Check if command is async
-                    result = redis_command(cmd, args, client_state, client_state['is_replica'])
-                    if inspect.iscoroutine(result):
-                        resp = await result
-                    else:
-                        resp = result
-                    print(f"handle_client: cmd={cmd}, resp={resp!r}, type={type(resp)}")
-                
-                if resp and (not client_state['is_replica'] or cmd.lower() in ['ping', 'replconf', 'psync']):
-                    print(f"handle_client: Writing response, cmd={cmd}, resp={resp!r}")
-                    writer.write(resp.encode() if isinstance(resp, str) else resp)
-                    await writer.drain()
-                    print(f"handle_client: Response sent for cmd={cmd}")
-    finally:
-        if client_state['is_replica']:
-            server_state['replicas'] = [(w, o) for w, o in server_state['replicas'] if w != writer]
-        writer.close()
-        await writer.wait_closed()
+    while True:
+        data = await reader.read(1024)
+        if not data: break
+        
+        cmd, args, consumed = convert_resp(data)
+        cmd_key = cmd.lower()
+
+        # --- LAYER 2: THE GUARDS ---
+        # 1. Permission Guard
+        error = check_permissions(server_state['role'], cmd_key)
+        if error:
+            writer.write(error.encode())
+            continue
+
+        # 2. Handshake/System Guard
+        # If this handles the response, it returns (resp, False)
+        sys_resp, proceed = await handle_replication_handshake(cmd, args, client_state, server_state)
+        if sys_resp:
+            writer.write(sys_resp if isinstance(sys_resp, bytes) else sys_resp.encode())
+            if not proceed: continue
+
+        # --- LAYER 3: EXECUTION (Unified Async Handling) ---
+        # We always 'await' the executor; it handles the internal sync/async logic
+        response = await execute_command(cmd_key, args, client_state)
+        
+        # --- POST-EXECUTION (AOF & REPLICATION) ---
+        if cmd_key in write_commands and not client_state['is_replica']:
+            await handle_persistence_and_replication(cmd, args, client_state)
+
+        if response:
+            writer.write(response.encode() if isinstance(response, str) else response)
+            await writer.drain()
+            
+        
+        
 async def start_replication(master_host, master_port, server_state, local_port):
     try:
         reader, writer = await asyncio.open_connection(master_host, master_port)
@@ -211,6 +176,7 @@ async def start_replication(master_host, master_port, server_state, local_port):
         writer.close()
         await writer.wait_closed()
         print(f"Disconnected from master {master_host}:{master_port}")
+        
 async def main():
     print("Logs from your program will appear here!")
     parser = argparse.ArgumentParser(description="Redis server with custom port and replication")
@@ -242,6 +208,20 @@ async def main():
         'replicas': []
     }
     
+    recovery_state = {
+        'multi_event': asyncio.Event(),
+        'exec_event': [],
+        'server_state': server_state,
+        'is_replica': True # Prevents cycles during recovery
+    }
+    recovery_state['multi_event'].set()
+    #  1. First, load the RDB snapshot (Point-in-time)
+    
+    initial_data = load_rdb()
+    rkey._data = initial_data
+    
+    # 2. Then, replay the AOF (Delta changes since last snapshot)
+    await load_from_aof(recovery_state)
     print(f"Starting server on port {port}")
     if master_host and master_port:
         print(f"Configured as slave of {master_host}:{master_port}")
