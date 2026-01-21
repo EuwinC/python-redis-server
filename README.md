@@ -1,6 +1,8 @@
 # Custom Redis Server (Python)
+**Built upon the foundations from [CodeCrafters "Build your own Redis" challenge](https://codecrafters.io/redis)** — then extended with many advanced features.
 
-A high-performance, **asynchronous Redis-compatible server** built from scratch using `asyncio`.
+A high-performance, asynchronous Redis-compatible server using `asyncio`.
+
 
 This project is an educational / experimental implementation that demonstrates core systems programming concepts:
 
